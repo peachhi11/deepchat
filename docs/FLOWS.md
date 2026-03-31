@@ -135,3 +135,58 @@ sequenceDiagram
 
 - `src/main/presenter/newAgentPresenter/legacyImportService.ts`
 - `src/main/presenter/lifecyclePresenter/hooks/after-start/legacyImportHook.ts`
+
+## 6. 规划中的可靠性增强流程（Spec Only）
+
+以下流程是当前已经落库的规划，不代表仓库当前已全部实现。
+
+### 6.1 Coordinator mode on top of subagents
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant D as DeepChatAgentPresenter
+    participant C as deepchat-coordinator
+    participant O as subagent_orchestrator
+    participant W as Worker Sessions
+
+    U->>D: complex request
+    D->>C: builtin preset execution
+    C->>O: dispatch worker tasks
+    O->>W: create/reuse child sessions
+    W-->>C: summarized results via orchestrator
+    C-->>U: final synthesized answer
+```
+
+### 6.2 Global memory autonomy flow
+
+```mermaid
+flowchart TD
+    Turn["Assistant turn completed"] --> Extract["turn-end extraction"]
+    Extract --> Filter["sensitive / transient filtering"]
+    Filter --> Memory["global memory pool (DuckDB)"]
+    Memory --> Merge["merge / dedupe"]
+    Merge --> Forget["auto forgetting / cleanup"]
+    Memory --> Summary["compact memory summary"]
+    Summary --> Prompt["future prompt assembly"]
+```
+
+### 6.3 Compaction hardening flow
+
+```mermaid
+flowchart TD
+    Start["context assembly"] --> Pressure{"prompt pressure?"}
+    Pressure -->|no| Normal["normal context path"]
+    Pressure -->|yes| ToolHeavy{"mostly stale tool output?"}
+    ToolHeavy -->|yes| Micro["micro-compaction pruning"]
+    ToolHeavy -->|no| Full["full compaction summary"]
+    Micro --> Prompt["prompt continues"]
+    Full --> Prompt
+```
+
+相关规划文档：
+
+1. [specs/coordinator-mode/spec.md](./specs/coordinator-mode/spec.md)
+2. [specs/global-memory-pool/spec.md](./specs/global-memory-pool/spec.md)
+3. [specs/compaction-hardening/spec.md](./specs/compaction-hardening/spec.md)
+4. [specs/agent-reliability-roadmap/spec.md](./specs/agent-reliability-roadmap/spec.md)

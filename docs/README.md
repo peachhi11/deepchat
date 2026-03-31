@@ -27,6 +27,20 @@ Renderer
 | [guides/code-navigation.md](./guides/code-navigation.md) | 当前代码导航入口 |
 | [guides/getting-started.md](./guides/getting-started.md) | 新开发者快速上手 |
 
+## 当前 Agent 规划入口
+
+这些文档描述已经落库、但不一定已实现完成的下一阶段 agent 技术规划：
+
+| 文档 | 用途 |
+| --- | --- |
+| [specs/agent-reliability-roadmap/spec.md](./specs/agent-reliability-roadmap/spec.md) | 可靠性升级总目标、差异、优势和阶段划分 |
+| [specs/agent-reliability-roadmap/plan.md](./specs/agent-reliability-roadmap/plan.md) | 推荐实施顺序、依赖关系、里程碑和接口面 |
+| [specs/coordinator-mode/spec.md](./specs/coordinator-mode/spec.md) | 基于现有 subagent 的 coordinator 层 |
+| [specs/global-memory-pool/spec.md](./specs/global-memory-pool/spec.md) | 基于 DuckDB 的全局长期记忆池 |
+| [specs/compaction-hardening/spec.md](./specs/compaction-hardening/spec.md) | full compaction 强化与 micro-compaction |
+| [specs/agent-context-grounding/spec.md](./specs/agent-context-grounding/spec.md) | cache-friendly grounding 设计 |
+| [specs/permission-approval-productization/spec.md](./specs/permission-approval-productization/spec.md) | 权限闭环产品化 |
+
 ## 本次清理落库
 
 | 位置 | 内容 |
@@ -56,7 +70,16 @@ docs/
 │   └── debugging.md
 ├── specs/
 │   ├── agent-cleanup/
-│   └── legacy-agentpresenter-retirement/
+│   ├── agent-context-grounding/
+│   ├── agent-doctor/
+│   ├── agent-reliability-roadmap/
+│   ├── builtin-agent-presets/
+│   ├── compaction-hardening/
+│   ├── coordinator-mode/
+│   ├── global-memory-pool/
+│   ├── legacy-agentpresenter-retirement/
+│   ├── permission-approval-productization/
+│   └── subagent-capability-profiles/
 └── archives/
     ├── legacy-agentpresenter-architecture.md
     ├── legacy-agentpresenter-flows.md

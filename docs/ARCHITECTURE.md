@@ -100,6 +100,48 @@ flowchart LR
 - 历史流程文档见 [archives/legacy-agentpresenter-flows.md](./archives/legacy-agentpresenter-flows.md)
 - 防回归脚本：`scripts/agent-cleanup-guard.mjs`
 
+## 规划中的可靠性增强（Spec Only）
+
+以下内容是已落库的规划文档，不代表当前已经全部实现：
+
+```mermaid
+flowchart LR
+    Renderer["Renderer / Stores / Views"] --> Preload["preload IPC bridge"]
+    Preload --> NewAgent["newAgentPresenter"]
+    NewAgent --> DeepChat["deepchatAgentPresenter"]
+    DeepChat --> Tool["toolPresenter"]
+    DeepChat --> Llm["llmProviderPresenter"]
+    DeepChat --> Grounding["cache-friendly grounding"]
+    DeepChat --> Memory["global memory pool"]
+    DeepChat --> Compaction["compaction hardening"]
+    Tool --> Coordinator["coordinator mode"]
+    Coordinator --> Subagent["existing subagent runtime"]
+    DeepChat --> Doctor["agent doctor (planned)"]
+```
+
+规划重点：
+
+- `agent-context-grounding`
+  - 让稳定上下文在第一轮就进入 prompt，减少盲搜和错误假设。
+- `permission-approval-productization`
+  - 把当前权限机制补成完整的 remember / revoke / scope 产品闭环。
+- `builtin-agent-presets` + `coordinator-mode`
+  - 用 builtin preset 固定高频任务策略，并在现有 subagent 之上增加 coordinator 层。
+- `global-memory-pool`
+  - 用 DeepChat 数据池中的 DuckDB 建立唯一长期记忆载体，由 autonomy 自动提取、合并、遗忘。
+- `compaction-hardening`
+  - 强化现有 full compaction，并增加 micro-compaction 削减旧 tool 噪音。
+- `agent-doctor`
+  - 作为独立流补统一诊断与恢复。
+
+相关规划入口：
+
+1. [specs/agent-reliability-roadmap/spec.md](./specs/agent-reliability-roadmap/spec.md)
+2. [specs/agent-reliability-roadmap/plan.md](./specs/agent-reliability-roadmap/plan.md)
+3. [specs/coordinator-mode/spec.md](./specs/coordinator-mode/spec.md)
+4. [specs/global-memory-pool/spec.md](./specs/global-memory-pool/spec.md)
+5. [specs/compaction-hardening/spec.md](./specs/compaction-hardening/spec.md)
+
 ## 推荐阅读顺序
 
 1. [FLOWS.md](./FLOWS.md)
