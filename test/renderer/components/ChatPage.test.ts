@@ -29,6 +29,7 @@ const buildAssistantMessage = (content: unknown) => ({
 
 type SetupOptions = {
   messages?: Array<Record<string, unknown>>
+  initialRunSnapshot?: Record<string, unknown> | null
   isStreaming?: boolean
   streamingBlocks?: unknown[]
   currentStreamMessageId?: string | null
@@ -100,6 +101,7 @@ const setup = async (options: SetupOptions = {}) => {
   })
 
   const agentSessionPresenter = {
+    getActiveRunSnapshot: vi.fn().mockResolvedValue(options.initialRunSnapshot ?? null),
     respondToolInteraction: vi.fn().mockResolvedValue(undefined),
     cancelGeneration: vi.fn().mockResolvedValue(undefined),
     retryMessage: vi.fn().mockResolvedValue(undefined),
@@ -114,6 +116,7 @@ const setup = async (options: SetupOptions = {}) => {
       spotlightStore.pendingMessageJump = null
     })
   })
+  const listeners = new Map<string, Array<(...args: any[]) => void>>()
 
   vi.doMock('@/stores/ui/session', () => ({
     useSessionStore: () => sessionStore
@@ -279,8 +282,25 @@ const setup = async (options: SetupOptions = {}) => {
   vi.doMock('@/components/trace/TraceDialog.vue', () => ({
     default: passthrough('TraceDialog')
   }))
+  ;(window as any).electron = {
+    ipcRenderer: {
+      on: vi.fn((event: string, handler: (...args: any[]) => void) => {
+        const handlers = listeners.get(event) ?? []
+        handlers.push(handler)
+        listeners.set(event, handlers)
+      }),
+      removeListener: vi.fn((event: string, handler: (...args: any[]) => void) => {
+        const handlers = listeners.get(event) ?? []
+        listeners.set(
+          event,
+          handlers.filter((candidate) => candidate !== handler)
+        )
+      })
+    }
+  }
 
   const ChatPage = (await import('@/pages/ChatPage.vue')).default
+  const { SESSION_EVENTS } = await import('@/events')
   const wrapper = mount(ChatPage, {
     props: {
       sessionId: 's1'
@@ -291,9 +311,16 @@ const setup = async (options: SetupOptions = {}) => {
 
   return {
     wrapper,
+    agentSessionPresenter,
     messageStore,
     pendingInputStore,
-    spotlightStore
+    spotlightStore,
+    emitIpc: (event: string, payload?: unknown) => {
+      for (const handler of listeners.get(event) ?? []) {
+        handler(undefined, payload)
+      }
+    },
+    SESSION_EVENTS
   }
 }
 
@@ -337,6 +364,55 @@ describe('ChatPage', () => {
       })
     )
     expect(wrapper.find('.message-list-stub').attributes('data-has-rate-limit')).toBe('true')
+  })
+
+  it('renders the run ticker when an active run snapshot is available', async () => {
+    const { wrapper, agentSessionPresenter } = await setup({
+      initialRunSnapshot: {
+        runId: 'run-1',
+        sessionId: 's1',
+        title: 'Implement run ticker',
+        goal: 'Implement run ticker',
+        status: 'ready',
+        stage: 'verify',
+        progressDone: 0,
+        progressTotal: 0,
+        tickerSummary: 'Implement run ticker',
+        completionAcknowledged: false,
+        updatedAt: 1
+      }
+    })
+
+    expect(agentSessionPresenter.getActiveRunSnapshot).toHaveBeenCalledWith('s1')
+    expect(wrapper.text()).toContain('ready')
+    expect(wrapper.text()).toContain('Implement run ticker')
+    expect(wrapper.text()).toContain('verify')
+  })
+
+  it('updates the run ticker when a run snapshot IPC event arrives', async () => {
+    const { wrapper, emitIpc, SESSION_EVENTS } = await setup()
+
+    emitIpc(SESSION_EVENTS.RUN_SNAPSHOT_UPDATED, {
+      sessionId: 's1',
+      snapshot: {
+        runId: 'run-2',
+        sessionId: 's1',
+        title: 'Handle permission wait',
+        goal: 'Handle permission wait',
+        status: 'executing',
+        stage: 'task',
+        progressDone: 0,
+        progressTotal: 0,
+        tickerSummary: 'Handle permission wait',
+        completionAcknowledged: false,
+        updatedAt: 2
+      }
+    })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('executing')
+    expect(wrapper.text()).toContain('Handle permission wait')
+    expect(wrapper.text()).toContain('task')
   })
 
   it('keeps pending lane visible below the tool interaction overlay', async () => {

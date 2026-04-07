@@ -8,6 +8,7 @@ import type {
   ChatMessageRecord,
   MessageTraceRecord,
   MessageFile,
+  RunSnapshot,
   SendMessageInput,
   UserMessageContent,
   AssistantMessageBlock,
@@ -923,6 +924,20 @@ export class AgentSessionPresenter {
     const record = this.sessionManager.get(sessionId)
     if (!record) return null
     return await this.tryBuildSessionWithState(record)
+  }
+
+  async getActiveRunSnapshot(sessionId: string): Promise<RunSnapshot | null> {
+    const session = this.sessionManager.get(sessionId)
+    if (!session) {
+      throw new Error(`Session not found: ${sessionId}`)
+    }
+
+    const agent = await this.resolveAgentImplementation(session.agentId)
+    if (!agent.getActiveRunSnapshot) {
+      return null
+    }
+
+    return await agent.getActiveRunSnapshot(sessionId)
   }
 
   async getMessages(sessionId: string): Promise<ChatMessageRecord[]> {

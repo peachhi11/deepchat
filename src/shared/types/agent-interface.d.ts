@@ -48,6 +48,15 @@ export type RunStatus =
 
 export type RunStage = 'intent' | 'plan' | 'task' | 'verify' | 'handoff'
 
+export type RunStepKind = 'wait' | 'decision'
+export type RunStepStatus = 'pending' | 'completed' | 'failed'
+export type RunCheckpointType =
+  | 'before_wait'
+  | 'before_compaction'
+  | 'before_reset'
+  | 'failure'
+  | 'completion'
+
 export interface HarnessRun {
   id: string
   sessionId: string
@@ -66,6 +75,31 @@ export interface HarnessRun {
   updatedAt: number
   startedAt?: number | null
   completedAt?: number | null
+}
+
+export interface RunStepRecord {
+  id: string
+  runId: string
+  sessionId: string
+  messageId?: string | null
+  toolCallId?: string | null
+  kind: RunStepKind
+  title: string
+  status: RunStepStatus
+  payloadJson?: string | null
+  createdAt: number
+  updatedAt: number
+  completedAt?: number | null
+}
+
+export interface RunCheckpoint {
+  id: string
+  runId: string
+  sessionId: string
+  checkpointType: RunCheckpointType
+  label: string
+  payloadJson?: string | null
+  createdAt: number
 }
 
 export interface RunSnapshot {
@@ -112,6 +146,9 @@ export interface IAgentImplementation {
 
   /** Get runtime state for a session */
   getSessionState(sessionId: string): Promise<DeepChatSessionState | null>
+
+  /** Get the latest durable run snapshot for a session */
+  getActiveRunSnapshot?(sessionId: string): Promise<RunSnapshot | null>
 
   /** Process a user message: persist, call LLM, stream response */
   processMessage(

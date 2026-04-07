@@ -22,7 +22,8 @@ vi.mock('@/events', () => ({
     DEACTIVATED: 'session:deactivated',
     STATUS_CHANGED: 'session:status-changed',
     COMPACTION_UPDATED: 'session:compaction-updated',
-    PENDING_INPUTS_UPDATED: 'session:pending-inputs-updated'
+    PENDING_INPUTS_UPDATED: 'session:pending-inputs-updated',
+    RUN_SNAPSHOT_UPDATED: 'session:run-snapshot-updated'
   },
   STREAM_EVENTS: {
     RESPONSE: 'stream:response',
@@ -89,6 +90,9 @@ function createMockSqlitePresenter() {
     summary_cursor_order_seq: 1,
     summary_updated_at: null
   }
+  const runsStore = new Map<string, any>()
+  const runStepsStore = new Map<string, any>()
+  const checkpointsStore = new Map<string, any>()
   return {
     newSessionsTable: {
       get: vi.fn(),
@@ -167,6 +171,117 @@ function createMockSqlitePresenter() {
       update: vi.fn(),
       delete: vi.fn(),
       deleteBySession: vi.fn()
+    },
+    deepchatRunsTable: {
+      insert: vi.fn((row: any) => {
+        runsStore.set(row.id, {
+          id: row.id,
+          session_id: row.sessionId,
+          parent_run_id: row.parentRunId ?? null,
+          origin_checkpoint_id: row.originCheckpointId ?? null,
+          title: row.title,
+          goal: row.goal,
+          status: row.status,
+          stage: row.stage,
+          current_task_id: row.currentTaskId ?? null,
+          current_step_id: row.currentStepId ?? null,
+          active_checkpoint_id: row.activeCheckpointId ?? null,
+          environment_id: row.environmentId ?? null,
+          trigger_message_id: row.triggerMessageId ?? null,
+          started_at: row.startedAt ?? null,
+          completed_at: row.completedAt ?? null,
+          created_at: row.createdAt ?? Date.now(),
+          updated_at: row.updatedAt ?? Date.now()
+        })
+      }),
+      get: vi.fn((id: string) => runsStore.get(id)),
+      listBySession: vi.fn((sessionId: string) =>
+        Array.from(runsStore.values())
+          .filter((row) => row.session_id === sessionId)
+          .sort((left, right) => right.updated_at - left.updated_at)
+      ),
+      getLatestBySession: vi.fn(
+        (sessionId: string) =>
+          Array.from(runsStore.values())
+            .filter((row) => row.session_id === sessionId)
+            .sort((left, right) => right.updated_at - left.updated_at)[0]
+      ),
+      update: vi.fn((id: string, patch: Record<string, unknown>) => {
+        const row = runsStore.get(id)
+        if (!row) {
+          return
+        }
+        Object.assign(row, patch)
+      }),
+      deleteBySession: vi.fn((sessionId: string) => {
+        for (const [id, row] of runsStore.entries()) {
+          if (row.session_id === sessionId) {
+            runsStore.delete(id)
+          }
+        }
+      })
+    },
+    deepchatRunStepsTable: {
+      insert: vi.fn((row: any) => {
+        runStepsStore.set(row.id, {
+          id: row.id,
+          run_id: row.runId,
+          session_id: row.sessionId,
+          message_id: row.messageId ?? null,
+          tool_call_id: row.toolCallId ?? null,
+          kind: row.kind,
+          title: row.title,
+          status: row.status,
+          payload_json: row.payloadJson ?? null,
+          created_at: row.createdAt ?? Date.now(),
+          updated_at: row.updatedAt ?? Date.now(),
+          completed_at: row.completedAt ?? null
+        })
+      }),
+      get: vi.fn((id: string) => runStepsStore.get(id)),
+      getLatestPendingWaitStep: vi.fn(
+        (runId: string) =>
+          Array.from(runStepsStore.values())
+            .filter(
+              (row) => row.run_id === runId && row.kind === 'wait' && row.status === 'pending'
+            )
+            .sort((left, right) => right.created_at - left.created_at)[0]
+      ),
+      update: vi.fn((id: string, patch: Record<string, unknown>) => {
+        const row = runStepsStore.get(id)
+        if (!row) {
+          return
+        }
+        Object.assign(row, patch)
+      }),
+      deleteBySession: vi.fn((sessionId: string) => {
+        for (const [id, row] of runStepsStore.entries()) {
+          if (row.session_id === sessionId) {
+            runStepsStore.delete(id)
+          }
+        }
+      })
+    },
+    deepchatRunCheckpointsTable: {
+      insert: vi.fn((row: any) => {
+        checkpointsStore.set(row.id, {
+          id: row.id,
+          run_id: row.runId,
+          session_id: row.sessionId,
+          checkpoint_type: row.checkpointType,
+          label: row.label,
+          payload_json: row.payloadJson ?? null,
+          created_at: row.createdAt ?? Date.now()
+        })
+      }),
+      get: vi.fn((id: string) => checkpointsStore.get(id)),
+      deleteBySession: vi.fn((sessionId: string) => {
+        for (const [id, row] of checkpointsStore.entries()) {
+          if (row.session_id === sessionId) {
+            checkpointsStore.delete(id)
+          }
+        }
+      })
     }
   } as any
 }
@@ -499,6 +614,115 @@ describe('AgentRuntimePresenter', () => {
       expect(assistantInsert.orderSeq).toBe(2)
       expect(assistantInsert.status).toBe('pending')
       expect(assistantInsert.content).toBe('[]')
+    })
+
+    it('creates and updates a durable run snapshot during a successful turn', async () => {
+      await agent.initSession('s1', { providerId: 'openai', modelId: 'gpt-4' })
+
+      await agent.processMessage('s1', 'Implement durable run snapshot tracking')
+
+      const snapshot = await agent.getActiveRunSnapshot('s1')
+
+      expect(snapshot).toMatchObject({
+        sessionId: 's1',
+        status: 'ready',
+        stage: 'verify',
+        title: 'Implement durable run snapshot tracking',
+        goal: 'Implement durable run snapshot tracking'
+      })
+
+      const runSnapshotCalls = (eventBus.sendToRenderer as ReturnType<typeof vi.fn>).mock.calls
+        .filter((call: any[]) => call[0] === 'session:run-snapshot-updated')
+        .map((call: any[]) => call[2].snapshot)
+
+      expect(runSnapshotCalls.map((snapshot: any) => snapshot?.status)).toEqual([
+        'planning',
+        'planning',
+        'executing',
+        'ready'
+      ])
+    })
+
+    it('reuses the latest non-terminal run across consecutive turns', async () => {
+      await agent.initSession('s1', { providerId: 'openai', modelId: 'gpt-4' })
+
+      await agent.processMessage('s1', 'First task summary')
+      const firstSnapshot = await agent.getActiveRunSnapshot('s1')
+
+      await agent.processMessage('s1', 'Second task summary')
+      const secondSnapshot = await agent.getActiveRunSnapshot('s1')
+
+      expect(firstSnapshot?.runId).toBeTruthy()
+      expect(secondSnapshot).toMatchObject({
+        runId: firstSnapshot?.runId,
+        status: 'ready',
+        title: 'Second task summary',
+        goal: 'Second task summary'
+      })
+    })
+
+    it('persists permission waits as durable run steps and checkpoints', async () => {
+      ;(processStream as ReturnType<typeof vi.fn>).mockImplementationOnce(async (params) => {
+        params.hooks?.onPermissionRequest?.(
+          {
+            permissionType: 'write',
+            description: 'Need permission to write package.json',
+            toolName: 'write_file',
+            paths: ['/workspace/package.json']
+          },
+          {
+            callId: 'tool-1',
+            name: 'write_file',
+            params: '{"path":"package.json"}'
+          }
+        )
+
+        return {
+          status: 'paused',
+          pendingInteractions: [
+            {
+              type: 'permission',
+              messageId: 'mock-msg-id',
+              toolCallId: 'tool-1',
+              toolName: 'write_file',
+              toolArgs: '{"path":"package.json"}',
+              permission: {
+                permissionType: 'write',
+                description: 'Need permission to write package.json',
+                toolName: 'write_file',
+                paths: ['/workspace/package.json']
+              }
+            }
+          ]
+        }
+      })
+
+      await agent.initSession('s1', {
+        providerId: 'openai',
+        modelId: 'gpt-4',
+        permissionMode: 'default'
+      })
+      await agent.processMessage('s1', 'Update package manifest')
+
+      const snapshot = await agent.getActiveRunSnapshot('s1')
+
+      expect(snapshot).toMatchObject({
+        status: 'waiting_permission',
+        blockerSummary: 'Need permission to write package.json'
+      })
+      expect(sqlitePresenter.deepchatRunStepsTable.insert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          kind: 'wait',
+          status: 'pending',
+          toolCallId: 'tool-1'
+        })
+      )
+      expect(sqlitePresenter.deepchatRunCheckpointsTable.insert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          checkpointType: 'before_wait',
+          label: 'Before permission wait'
+        })
+      )
     })
 
     it('calls processStream with correct params', async () => {
@@ -2886,6 +3110,37 @@ describe('AgentRuntimePresenter', () => {
 
     it('handles permission grant by executing deferred tool and resuming', async () => {
       await agent.initSession('s1', { providerId: 'openai', modelId: 'gpt-4' })
+      sqlitePresenter.deepchatRunsTable.insert({
+        id: 'run-1',
+        sessionId: 's1',
+        title: 'Need permission',
+        goal: 'Need permission',
+        status: 'waiting_permission',
+        stage: 'task',
+        activeCheckpointId: 'cp-1',
+        createdAt: 1,
+        updatedAt: 1
+      })
+      sqlitePresenter.deepchatRunCheckpointsTable.insert({
+        id: 'cp-1',
+        runId: 'run-1',
+        sessionId: 's1',
+        checkpointType: 'before_wait',
+        label: 'Before permission wait',
+        createdAt: 1
+      })
+      sqlitePresenter.deepchatRunStepsTable.insert({
+        id: 'step-wait-1',
+        runId: 'run-1',
+        sessionId: 's1',
+        messageId: 'm1',
+        toolCallId: 'tc1',
+        kind: 'wait',
+        title: 'Need permission',
+        status: 'pending',
+        createdAt: 1,
+        updatedAt: 1
+      })
       makeAssistantRow({
         blocks: [
           {
@@ -2948,6 +3203,25 @@ describe('AgentRuntimePresenter', () => {
       expect(updatedBlocks[0].status).toBe('success')
       expect(updatedBlocks[1].status).toBe('granted')
       expect(updatedBlocks[1].extra.needsUserAction).toBe(false)
+      expect(sqlitePresenter.deepchatRunStepsTable.update).toHaveBeenCalledWith(
+        'step-wait-1',
+        expect.objectContaining({
+          status: 'completed',
+          completed_at: expect.any(Number)
+        })
+      )
+      expect(sqlitePresenter.deepchatRunStepsTable.insert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          kind: 'decision',
+          title: 'Permission granted (write)',
+          toolCallId: 'tc1'
+        })
+      )
+      await expect(agent.getActiveRunSnapshot('s1')).resolves.toMatchObject({
+        runId: 'run-1',
+        status: 'ready',
+        blockerSummary: null
+      })
     })
 
     it('normalizes deferred screenshot tool results before resume', async () => {

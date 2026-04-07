@@ -12,6 +12,7 @@
         :project="sessionProject"
         :is-read-only="isReadOnlySession"
       />
+      <RunTicker v-if="runSnapshot" class="chat-capture-hide" :snapshot="runSnapshot" />
       <div v-if="isChatSearchOpen" class="pointer-events-none sticky top-14 z-20 px-6">
         <div class="mx-auto flex w-full max-w-5xl justify-end">
           <ChatSearchBar
@@ -107,6 +108,7 @@ import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { TooltipProvider } from '@shadcn/components/ui/tooltip'
 import ChatTopBar from '@/components/chat/ChatTopBar.vue'
+import RunTicker from '@/components/chat/RunTicker.vue'
 import ChatSearchBar from '@/components/chat/ChatSearchBar.vue'
 import MessageList from '@/components/chat/MessageList.vue'
 import type {
@@ -127,6 +129,8 @@ import { usePendingInputStore } from '@/stores/ui/pendingInput'
 import { useSpotlightStore } from '@/stores/ui/spotlight'
 import { useModelStore } from '@/stores/modelStore'
 import { usePresenter } from '@/composables/usePresenter'
+import { SESSION_EVENTS } from '@/events'
+import { createIpcSubscriptionScope } from '@/lib/ipcSubscription'
 import {
   applyChatSearchHighlights,
   clearChatSearchHighlights,
@@ -138,6 +142,7 @@ import type {
   AssistantMessageBlock,
   MessageFile,
   MessageMetadata,
+  RunSnapshot,
   ToolInteractionResponse
 } from '@shared/types/agent-interface'
 
@@ -159,6 +164,7 @@ const isReadOnlySession = computed(() => sessionStore.activeSession?.sessionKind
 const isGenerating = computed(
   () => sessionStore.activeSession?.status === 'working' || messageStore.isStreaming
 )
+const runSnapshot = ref<RunSnapshot | null>(null)
 const RATE_LIMIT_STREAM_MESSAGE_PREFIX = '__rate_limit__:'
 const isAcpWorkdirMissing = computed(() => {
   const activeSession = sessionStore.activeSession
@@ -249,7 +255,11 @@ watch(
   async (id) => {
     clearChatSearchState()
     if (id) {
-      await Promise.all([messageStore.loadMessages(id), pendingInputStore.loadPendingInputs(id)])
+      await Promise.all([
+        messageStore.loadMessages(id),
+        pendingInputStore.loadPendingInputs(id),
+        loadRunSnapshot(id)
+      ])
       await nextTick()
       if (spotlightStore.pendingMessageJump?.sessionId === id) {
         void focusPendingSpotlightMessageJump()
@@ -258,10 +268,27 @@ watch(
       scrollToBottom()
       return
     }
+    runSnapshot.value = null
     pendingInputStore.clear()
   },
   { immediate: true }
 )
+
+watch(
+  () => sessionStore.activeSession?.status,
+  async () => {
+    if (!props.sessionId) {
+      runSnapshot.value = null
+      return
+    }
+
+    await loadRunSnapshot(props.sessionId)
+  }
+)
+
+async function loadRunSnapshot(sessionId: string): Promise<void> {
+  runSnapshot.value = await agentSessionPresenter.getActiveRunSnapshot(sessionId)
+}
 
 function parseUserMessageContent(record: ChatMessageRecord): DisplayUserMessageContent {
   try {
@@ -593,6 +620,7 @@ const message = ref('')
 const attachedFiles = ref<MessageFile[]>([])
 const chatInputRef = ref<{ triggerAttach: () => void } | null>(null)
 const isHandlingInteraction = ref(false)
+const ipcScope = createIpcSubscriptionScope()
 
 const handleContextMenuAskAI = (event: Event) => {
   if (isReadOnlySession.value) {
@@ -939,11 +967,23 @@ async function onResumePendingQueue() {
 }
 
 onMounted(() => {
+  ipcScope.on(
+    SESSION_EVENTS.RUN_SNAPSHOT_UPDATED,
+    (_event, payload: { sessionId: string; snapshot: RunSnapshot | null }) => {
+      if (payload?.sessionId !== props.sessionId) {
+        return
+      }
+
+      runSnapshot.value = payload.snapshot ?? null
+    }
+  )
+
   window.addEventListener('context-menu-ask-ai', handleContextMenuAskAI)
   window.addEventListener('keydown', handleWindowKeydown)
 })
 
 onUnmounted(() => {
+  ipcScope.cleanup()
   window.removeEventListener('context-menu-ask-ai', handleContextMenuAskAI)
   window.removeEventListener('keydown', handleWindowKeydown)
   clearChatSearchHighlights(messageSearchRoot.value)

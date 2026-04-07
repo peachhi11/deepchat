@@ -845,4 +845,115 @@ describeIfSqlite('SQLitePresenter legacy schema bootstrap', () => {
     expect(presenter.deepchatRunsTable.listBySession('session-1')).toEqual([])
     presenter.close()
   })
+
+  it('creates deepchat_run_steps and deepchat_run_checkpoints tables through migrations', async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'deepchat-sqlite-presenter-'))
+    tempDirs.push(tempDir)
+
+    const dbPath = path.join(tempDir, 'agent.db')
+    const presenter = new SQLitePresenterCtor(dbPath)
+    presenter.close()
+
+    const checkDb = new BetterSqlite3(dbPath)
+    const stepColumns = checkDb.prepare('PRAGMA table_info(deepchat_run_steps)').all() as Array<{
+      name: string
+    }>
+    const checkpointColumns = checkDb
+      .prepare('PRAGMA table_info(deepchat_run_checkpoints)')
+      .all() as Array<{
+      name: string
+    }>
+    const versions = checkDb
+      .prepare('SELECT version FROM schema_versions ORDER BY version ASC')
+      .all() as Array<{ version: number }>
+
+    expect(new Set(stepColumns.map((column) => column.name))).toEqual(
+      new Set([
+        'id',
+        'run_id',
+        'session_id',
+        'message_id',
+        'tool_call_id',
+        'kind',
+        'title',
+        'status',
+        'payload_json',
+        'created_at',
+        'updated_at',
+        'completed_at'
+      ])
+    )
+    expect(new Set(checkpointColumns.map((column) => column.name))).toEqual(
+      new Set([
+        'id',
+        'run_id',
+        'session_id',
+        'checkpoint_type',
+        'label',
+        'payload_json',
+        'created_at'
+      ])
+    )
+    expect(versions.map((entry) => entry.version)).toEqual(expect.arrayContaining([24, 25]))
+    checkDb.close()
+  })
+
+  it('supports deepchat_run_steps and deepchat_run_checkpoints CRUD through sqlite helpers', async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'deepchat-sqlite-presenter-'))
+    tempDirs.push(tempDir)
+
+    const dbPath = path.join(tempDir, 'agent.db')
+    const presenter = new SQLitePresenterCtor(dbPath)
+
+    presenter.deepchatRunCheckpointsTable.insert({
+      id: 'cp-1',
+      runId: 'run-1',
+      sessionId: 'session-1',
+      checkpointType: 'before_wait',
+      label: 'Before permission wait',
+      payloadJson: '{"messageId":"m1"}',
+      createdAt: 100
+    })
+    presenter.deepchatRunStepsTable.insert({
+      id: 'step-1',
+      runId: 'run-1',
+      sessionId: 'session-1',
+      messageId: 'm1',
+      toolCallId: 'tc-1',
+      kind: 'wait',
+      title: 'Need permission to write package.json',
+      status: 'pending',
+      payloadJson: '{"permissionType":"write"}',
+      createdAt: 110,
+      updatedAt: 110
+    })
+
+    presenter.deepchatRunStepsTable.update('step-1', {
+      status: 'completed',
+      completed_at: 120,
+      updated_at: 120
+    })
+
+    expect(presenter.deepchatRunCheckpointsTable.get('cp-1')).toMatchObject({
+      id: 'cp-1',
+      run_id: 'run-1',
+      checkpoint_type: 'before_wait',
+      label: 'Before permission wait'
+    })
+    expect(presenter.deepchatRunStepsTable.get('step-1')).toMatchObject({
+      id: 'step-1',
+      run_id: 'run-1',
+      kind: 'wait',
+      status: 'completed',
+      completed_at: 120
+    })
+    expect(presenter.deepchatRunStepsTable.getLatestPendingWaitStep('run-1')).toBeUndefined()
+
+    presenter.deepchatRunStepsTable.deleteBySession('session-1')
+    presenter.deepchatRunCheckpointsTable.deleteBySession('session-1')
+
+    expect(presenter.deepchatRunStepsTable.get('step-1')).toBeUndefined()
+    expect(presenter.deepchatRunCheckpointsTable.get('cp-1')).toBeUndefined()
+    presenter.close()
+  })
 })

@@ -10,6 +10,7 @@ import type {
   SessionCompactionState,
   LegacyImportStatus,
   PendingSessionInputRecord,
+  RunSnapshot,
   SendMessageInput,
   ToolInteractionResponse,
   ToolInteractionResult,
@@ -84,6 +85,7 @@ export interface IAgentSessionPresenter {
     parentSessionId?: string
   }): Promise<SessionWithState[]>
   getSession(sessionId: string): Promise<SessionWithState | null>
+  getActiveRunSnapshot(sessionId: string): Promise<RunSnapshot | null>
   getMessages(sessionId: string): Promise<ChatMessageRecord[]>
   searchHistory(query: string, options?: HistorySearchOptions): Promise<HistorySearchHit[]>
   getSessionCompactionState(sessionId: string): Promise<SessionCompactionState>

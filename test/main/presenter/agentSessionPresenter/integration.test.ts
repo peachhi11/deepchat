@@ -24,7 +24,8 @@ vi.mock('@/events', async (importOriginal) => {
       DEACTIVATED: 'session:deactivated',
       STATUS_CHANGED: 'session:status-changed',
       COMPACTION_UPDATED: 'session:compaction-updated',
-      PENDING_INPUTS_UPDATED: 'session:pending-inputs-updated'
+      PENDING_INPUTS_UPDATED: 'session:pending-inputs-updated',
+      RUN_SNAPSHOT_UPDATED: 'session:run-snapshot-updated'
     },
     STREAM_EVENTS: {
       RESPONSE: 'stream:response',
@@ -57,6 +58,9 @@ function createMockSqlitePresenter() {
   const deepchatSessionsStore = new Map<string, any>()
   const messagesStore = new Map<string, any>()
   const pendingInputsStore = new Map<string, any>()
+  const runsStore = new Map<string, any>()
+  const runStepsStore = new Map<string, any>()
+  const checkpointsStore = new Map<string, any>()
   let messagesList: any[] = []
 
   return {
@@ -444,11 +448,129 @@ function createMockSqlitePresenter() {
         }
       })
     },
+    deepchatRunsTable: {
+      insert: vi.fn((row: any) => {
+        runsStore.set(row.id, {
+          id: row.id,
+          session_id: row.sessionId,
+          parent_run_id: row.parentRunId ?? null,
+          origin_checkpoint_id: row.originCheckpointId ?? null,
+          title: row.title,
+          goal: row.goal,
+          status: row.status,
+          stage: row.stage,
+          current_task_id: row.currentTaskId ?? null,
+          current_step_id: row.currentStepId ?? null,
+          active_checkpoint_id: row.activeCheckpointId ?? null,
+          environment_id: row.environmentId ?? null,
+          trigger_message_id: row.triggerMessageId ?? null,
+          started_at: row.startedAt ?? null,
+          completed_at: row.completedAt ?? null,
+          created_at: row.createdAt ?? Date.now(),
+          updated_at: row.updatedAt ?? Date.now()
+        })
+      }),
+      get: vi.fn((id: string) => runsStore.get(id)),
+      listBySession: vi.fn((sessionId: string) =>
+        Array.from(runsStore.values())
+          .filter((row) => row.session_id === sessionId)
+          .sort((left, right) => right.updated_at - left.updated_at)
+      ),
+      getLatestBySession: vi.fn(
+        (sessionId: string) =>
+          Array.from(runsStore.values())
+            .filter((row) => row.session_id === sessionId)
+            .sort((left, right) => right.updated_at - left.updated_at)[0]
+      ),
+      update: vi.fn((id: string, fields: Record<string, unknown>) => {
+        const row = runsStore.get(id)
+        if (!row) return
+        runsStore.set(id, {
+          ...row,
+          ...fields,
+          updated_at: fields.updated_at ?? Date.now()
+        })
+      }),
+      deleteBySession: vi.fn((sessionId: string) => {
+        for (const [id, row] of runsStore.entries()) {
+          if (row.session_id === sessionId) {
+            runsStore.delete(id)
+          }
+        }
+      })
+    },
+    deepchatRunStepsTable: {
+      insert: vi.fn((row: any) => {
+        runStepsStore.set(row.id, {
+          id: row.id,
+          run_id: row.runId,
+          session_id: row.sessionId,
+          message_id: row.messageId ?? null,
+          tool_call_id: row.toolCallId ?? null,
+          kind: row.kind,
+          title: row.title,
+          status: row.status,
+          payload_json: row.payloadJson ?? null,
+          created_at: row.createdAt ?? Date.now(),
+          updated_at: row.updatedAt ?? Date.now(),
+          completed_at: row.completedAt ?? null
+        })
+      }),
+      get: vi.fn((id: string) => runStepsStore.get(id)),
+      getLatestPendingWaitStep: vi.fn(
+        (runId: string) =>
+          Array.from(runStepsStore.values())
+            .filter(
+              (row) => row.run_id === runId && row.kind === 'wait' && row.status === 'pending'
+            )
+            .sort((left, right) => right.created_at - left.created_at)[0]
+      ),
+      update: vi.fn((id: string, fields: Record<string, unknown>) => {
+        const row = runStepsStore.get(id)
+        if (!row) return
+        runStepsStore.set(id, {
+          ...row,
+          ...fields,
+          updated_at: fields.updated_at ?? Date.now()
+        })
+      }),
+      deleteBySession: vi.fn((sessionId: string) => {
+        for (const [id, row] of runStepsStore.entries()) {
+          if (row.session_id === sessionId) {
+            runStepsStore.delete(id)
+          }
+        }
+      })
+    },
+    deepchatRunCheckpointsTable: {
+      insert: vi.fn((row: any) => {
+        checkpointsStore.set(row.id, {
+          id: row.id,
+          run_id: row.runId,
+          session_id: row.sessionId,
+          checkpoint_type: row.checkpointType,
+          label: row.label,
+          payload_json: row.payloadJson ?? null,
+          created_at: row.createdAt ?? Date.now()
+        })
+      }),
+      get: vi.fn((id: string) => checkpointsStore.get(id)),
+      deleteBySession: vi.fn((sessionId: string) => {
+        for (const [id, row] of checkpointsStore.entries()) {
+          if (row.session_id === sessionId) {
+            checkpointsStore.delete(id)
+          }
+        }
+      })
+    },
     // Expose internal stores for assertion
     _sessionsStore: sessionsStore,
     _deepchatSessionsStore: deepchatSessionsStore,
     _messagesStore: messagesStore,
     _pendingInputsStore: pendingInputsStore,
+    _runsStore: runsStore,
+    _runStepsStore: runStepsStore,
+    _checkpointsStore: checkpointsStore,
     _getMessagesList: () => messagesList
   } as any
 }
@@ -609,6 +731,14 @@ describe('Integration: createSession end-to-end', () => {
     )
     expect(streamEndCalls.length).toBeGreaterThanOrEqual(1)
     expect(streamEndCalls[0][2].conversationId).toBe(session.id)
+
+    const runSnapshot = await agentPresenter.getActiveRunSnapshot(session.id)
+    expect(runSnapshot).toMatchObject({
+      sessionId: session.id,
+      status: 'ready',
+      title: 'Tell me a joke',
+      goal: 'Tell me a joke'
+    })
   })
 
   it('session list returns enriched sessions', async () => {
@@ -653,6 +783,7 @@ describe('Integration: createSession end-to-end', () => {
 
     const remainingSession = sqlitePresenter.newSessionsTable.get(session.id)
     expect(remainingSession).toBeTruthy()
+    expect(await agentPresenter.getActiveRunSnapshot(session.id)).toBeNull()
   })
 })
 

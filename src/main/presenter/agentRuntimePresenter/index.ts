@@ -2,12 +2,16 @@ import type {
   AssistantMessageBlock,
   ChatMessageRecord,
   DeepChatSessionState,
+  HarnessRun,
   IAgentImplementation,
   MessageFile,
   PendingInputEnqueueSource,
   PendingSessionInputRecord,
   PermissionMode,
   QueuePendingInputOptions,
+  RunCheckpoint,
+  RunSnapshot,
+  RunStepRecord,
   SendMessageInput,
   SessionCompactionState,
   SessionGenerationSettings,
@@ -53,6 +57,11 @@ import { buildTerminalErrorBlocks, DeepChatMessageStore } from './messageStore'
 import { PendingInputCoordinator } from './pendingInputCoordinator'
 import { DeepChatPendingInputStore } from './pendingInputStore'
 import { processStream } from './process'
+import { DeepChatRunCheckpointStore } from './runCheckpointStore'
+import { DeepChatRunStepStore } from './runStepStore'
+import { RunSnapshotBuilder } from './runSnapshotBuilder'
+import { RunStateManager } from './runStateManager'
+import { DeepChatRunStore } from './runStore'
 import { DeepChatSessionStore, type SessionSummaryState } from './sessionStore'
 import type { InterleavedReasoningConfig, PendingToolInteraction, ProcessResult } from './types'
 import { ToolOutputGuard } from './toolOutputGuard'
@@ -143,6 +152,11 @@ export class AgentRuntimePresenter implements IAgentImplementation {
   private readonly messageStore: DeepChatMessageStore
   private readonly pendingInputStore: DeepChatPendingInputStore
   private readonly pendingInputCoordinator: PendingInputCoordinator
+  private readonly runStore: DeepChatRunStore
+  private readonly runStepStore: DeepChatRunStepStore
+  private readonly runCheckpointStore: DeepChatRunCheckpointStore
+  private readonly runStateManager: RunStateManager
+  private readonly runSnapshotBuilder: RunSnapshotBuilder
   private readonly runtimeState: Map<string, DeepChatSessionState> = new Map()
   private readonly sessionGenerationSettings: Map<string, SessionGenerationSettings> = new Map()
   private readonly abortControllers: Map<string, AbortController> = new Map()
@@ -189,6 +203,14 @@ export class AgentRuntimePresenter implements IAgentImplementation {
     this.messageStore = new DeepChatMessageStore(sqlitePresenter)
     this.pendingInputStore = new DeepChatPendingInputStore(sqlitePresenter)
     this.pendingInputCoordinator = new PendingInputCoordinator(this.pendingInputStore)
+    this.runStore = new DeepChatRunStore(sqlitePresenter)
+    this.runStepStore = new DeepChatRunStepStore(sqlitePresenter)
+    this.runCheckpointStore = new DeepChatRunCheckpointStore(sqlitePresenter)
+    this.runStateManager = new RunStateManager(this.runStore)
+    this.runSnapshotBuilder = new RunSnapshotBuilder({
+      runStepStore: this.runStepStore,
+      runCheckpointStore: this.runCheckpointStore
+    })
     this.compactionService = new CompactionService(
       this.sessionStore,
       this.messageStore,
@@ -281,6 +303,9 @@ export class AgentRuntimePresenter implements IAgentImplementation {
     this.activeGenerations.delete(sessionId)
 
     this.pendingInputCoordinator.deleteBySession(sessionId)
+    this.runStateManager.clearSession(sessionId)
+    this.runStepStore.deleteBySession(sessionId)
+    this.runCheckpointStore.deleteBySession(sessionId)
     this.messageStore.deleteBySession(sessionId)
     this.sessionStore.delete(sessionId)
     this.runtimeState.delete(sessionId)
@@ -414,10 +439,16 @@ export class AgentRuntimePresenter implements IAgentImplementation {
     const normalizedInput = this.normalizeUserMessageInput(content)
     const supportsVision = this.supportsVision(state.providerId, state.modelId)
     const projectDir = this.resolveProjectDir(sessionId, context?.projectDir)
+    let activeRun: HarnessRun | null = this.runStateManager.ensureActiveRun({
+      sessionId,
+      title: this.buildRunTitle(normalizedInput.text),
+      goal: this.buildRunGoal(normalizedInput.text)
+    })
     console.log(
       `[DeepChatAgent] processMessage session=${sessionId} content="${normalizedInput.text.slice(0, 60)}" projectDir=${projectDir ?? '<none>'}`
     )
 
+    this.emitRunSnapshotUpdate(sessionId, activeRun)
     this.setSessionStatus(sessionId, 'generating')
     const preStreamAbortController = this.ensureSessionAbortController(sessionId)
     const preStreamAbortSignal = preStreamAbortController.signal
@@ -501,6 +532,10 @@ export class AgentRuntimePresenter implements IAgentImplementation {
       if (!userMessageId) {
         throw new Error('Failed to create user message.')
       }
+      if (activeRun) {
+        activeRun = this.runStateManager.attachTriggerMessage(activeRun.id, userMessageId)
+        this.emitRunSnapshotUpdate(sessionId, activeRun)
+      }
       this.throwIfAbortRequested(preStreamAbortSignal)
       this.emitMessageRefresh(sessionId, userMessageId)
 
@@ -541,9 +576,14 @@ export class AgentRuntimePresenter implements IAgentImplementation {
       if (context?.emitRefreshBeforeStream) {
         this.emitMessageRefresh(sessionId, assistantMessageId)
       }
+      if (activeRun) {
+        activeRun = this.runStateManager.markExecuting(activeRun.id)
+        this.emitRunSnapshotUpdate(sessionId, activeRun)
+      }
 
       const { generationId, result } = await this.runStreamForMessage({
         sessionId,
+        runId: activeRun?.id,
         messageId: assistantMessageId,
         messages,
         projectDir,
@@ -567,6 +607,9 @@ export class AgentRuntimePresenter implements IAgentImplementation {
       }
       try {
         this.applyProcessResultStatus(sessionId, result, generationId)
+        if (activeRun && this.isActiveGeneration(sessionId, generationId)) {
+          activeRun = this.applyRunResultStatus(sessionId, activeRun.id, result)
+        }
       } finally {
         this.clearActiveGeneration(sessionId, generationId)
       }
@@ -608,6 +651,10 @@ export class AgentRuntimePresenter implements IAgentImplementation {
           stopReason: 'user_stop',
           errorMessage: 'common.error.userCanceledGeneration'
         })
+        if (activeRun) {
+          activeRun = this.runStateManager.markAborted(activeRun.id)
+          this.emitRunSnapshotUpdate(sessionId, activeRun)
+        }
         this.setSessionStatus(sessionId, 'idle')
         return
       }
@@ -635,6 +682,10 @@ export class AgentRuntimePresenter implements IAgentImplementation {
         projectDir,
         error: { message: errorMessage }
       })
+      if (activeRun) {
+        activeRun = this.runStateManager.markFailed(activeRun.id)
+        this.emitRunSnapshotUpdate(sessionId, activeRun)
+      }
       this.setSessionStatus(sessionId, 'error')
     } finally {
       this.clearSessionAbortController(sessionId, preStreamAbortController)
@@ -710,10 +761,20 @@ export class AgentRuntimePresenter implements IAgentImplementation {
         const permissionType = permissionPayload?.permissionType ?? 'write'
         const state = this.runtimeState.get(sessionId)
         const projectDir = this.resolveProjectDir(sessionId)
+        const activeRunId = this.runStateManager.getLatestRun(sessionId)?.id ?? null
         let shouldDispatchResolvedToolHook = false
 
         if (response.granted) {
           this.markPermissionResolved(actionBlock, true, permissionType)
+          if (activeRunId) {
+            this.recordPermissionDecision(activeRunId, {
+              sessionId,
+              messageId,
+              toolCallId: toolCall.id,
+              granted: true,
+              permissionType
+            })
+          }
           await this.grantPermissionForPayload(sessionId, permissionPayload, toolCall)
           this.dispatchHook('PreToolUse', {
             sessionId,
@@ -767,6 +828,10 @@ export class AgentRuntimePresenter implements IAgentImplementation {
               projectDir,
               error: { message: execution.terminalError }
             })
+            if (activeRunId) {
+              const failedRun = this.runStateManager.markFailed(activeRunId)
+              this.emitRunSnapshotUpdate(sessionId, failedRun)
+            }
             this.setSessionStatus(sessionId, 'error')
             return { resumed: false }
           }
@@ -809,11 +874,30 @@ export class AgentRuntimePresenter implements IAgentImplementation {
               permissionType: execution.permissionRequest.permissionType,
               permissionRequest: JSON.stringify(execution.permissionRequest)
             }
+            if (activeRunId) {
+              this.recordPermissionWait(activeRunId, {
+                sessionId,
+                messageId,
+                toolCallId: toolCall.id,
+                toolName: toolCall.name || execution.permissionRequest.toolName || 'tool',
+                toolArgs: toolCall.params || '',
+                permission: execution.permissionRequest
+              })
+            }
           } else {
             shouldDispatchResolvedToolHook = true
           }
         } else {
           this.markPermissionResolved(actionBlock, false, permissionType)
+          if (activeRunId) {
+            this.recordPermissionDecision(activeRunId, {
+              sessionId,
+              messageId,
+              toolCallId: toolCall.id,
+              granted: false,
+              permissionType
+            })
+          }
           this.updateToolCallResponse(blocks, toolCall.id, 'User denied the request.', true)
           shouldDispatchResolvedToolHook = true
         }
@@ -936,6 +1020,10 @@ export class AgentRuntimePresenter implements IAgentImplementation {
     return await this.getEffectiveSessionGenerationSettings(sessionId)
   }
 
+  async getActiveRunSnapshot(sessionId: string): Promise<RunSnapshot | null> {
+    return this.runSnapshotBuilder.build(this.runStateManager.getLatestRun(sessionId))
+  }
+
   async updateGenerationSettings(
     sessionId: string,
     settings: Partial<SessionGenerationSettings>
@@ -966,6 +1054,7 @@ export class AgentRuntimePresenter implements IAgentImplementation {
   }
 
   async cancelGeneration(sessionId: string): Promise<void> {
+    let latestRun = this.runStateManager.getLatestRun(sessionId)
     const activeGeneration = this.activeGenerations.get(sessionId)
     if (activeGeneration) {
       activeGeneration.abortController.abort()
@@ -994,6 +1083,10 @@ export class AgentRuntimePresenter implements IAgentImplementation {
       }
     }
     this.abortDeferredToolAbortControllers(sessionId)
+    if (latestRun) {
+      latestRun = this.runStateManager.markAborted(latestRun.id)
+      this.emitRunSnapshotUpdate(sessionId, latestRun)
+    }
     this.setSessionStatus(sessionId, 'idle')
   }
 
@@ -1289,9 +1382,13 @@ export class AgentRuntimePresenter implements IAgentImplementation {
 
     await this.cancelGeneration(sessionId)
     this.pendingInputCoordinator.deleteBySession(sessionId)
+    this.runStateManager.clearSession(sessionId)
+    this.runStepStore.deleteBySession(sessionId)
+    this.runCheckpointStore.deleteBySession(sessionId)
     this.messageStore.deleteBySession(sessionId)
     this.resetSummaryState(sessionId)
     this.setSessionStatus(sessionId, 'idle')
+    this.emitRunSnapshotUpdate(sessionId, null)
   }
 
   async retryMessage(sessionId: string, messageId: string): Promise<void> {
@@ -1404,6 +1501,7 @@ export class AgentRuntimePresenter implements IAgentImplementation {
 
   private async runStreamForMessage(args: {
     sessionId: string
+    runId?: string
     messageId: string
     messages: ChatMessage[]
     projectDir: string | null
@@ -1414,6 +1512,7 @@ export class AgentRuntimePresenter implements IAgentImplementation {
   }): Promise<{ generationId: string; result: ProcessResult }> {
     const {
       sessionId,
+      runId,
       messageId,
       messages,
       projectDir,
@@ -1624,6 +1723,16 @@ export class AgentRuntimePresenter implements IAgentImplementation {
               permission,
               tool
             })
+            if (runId && tool.callId) {
+              this.recordPermissionWait(runId, {
+                sessionId,
+                messageId,
+                toolCallId: tool.callId,
+                toolName: tool.name ?? permission.toolName ?? 'tool',
+                toolArgs: tool.params ?? '',
+                permission
+              })
+            }
           },
           onInterleavedReasoningGap: (gap) => {
             console.warn(
@@ -1897,6 +2006,29 @@ export class AgentRuntimePresenter implements IAgentImplementation {
     this.setSessionStatus(sessionId, 'error')
   }
 
+  private applyRunResultStatus(
+    sessionId: string,
+    runId: string,
+    result: ProcessResult | null | undefined
+  ): HarnessRun | null {
+    let nextRun: HarnessRun | null
+
+    if (!result?.status) {
+      nextRun = this.runStateManager.markReady(runId)
+    } else if (result.status === 'completed') {
+      nextRun = this.runStateManager.markReady(runId)
+    } else if (result.status === 'paused') {
+      nextRun = this.runStore.get(runId)
+    } else if (result.status === 'aborted') {
+      nextRun = this.runStateManager.markAborted(runId)
+    } else {
+      nextRun = this.runStateManager.markFailed(runId)
+    }
+
+    this.emitRunSnapshotUpdate(sessionId, nextRun)
+    return nextRun
+  }
+
   private async resumeAssistantMessage(
     sessionId: string,
     messageId: string,
@@ -1909,6 +2041,7 @@ export class AgentRuntimePresenter implements IAgentImplementation {
     this.resumingMessages.add(messageId)
     let preStreamAbortController: AbortController | null = null
     let preStreamAbortSignal: AbortSignal | undefined
+    let activeRun = this.runStateManager.getLatestRun(sessionId)
 
     try {
       const state = this.runtimeState.get(sessionId)
@@ -1917,6 +2050,10 @@ export class AgentRuntimePresenter implements IAgentImplementation {
       }
 
       this.setSessionStatus(sessionId, 'generating')
+      if (activeRun) {
+        activeRun = this.runStateManager.markExecuting(activeRun.id)
+        this.emitRunSnapshotUpdate(sessionId, activeRun)
+      }
       preStreamAbortController = this.ensureSessionAbortController(sessionId)
       preStreamAbortSignal = preStreamAbortController.signal
       this.throwIfAbortRequested(preStreamAbortSignal)
@@ -1997,6 +2134,10 @@ export class AgentRuntimePresenter implements IAgentImplementation {
             error: resumeBudget.message
           })
           this.setSessionStatus(sessionId, 'error')
+          if (activeRun) {
+            activeRun = this.runStateManager.markFailed(activeRun.id)
+            this.emitRunSnapshotUpdate(sessionId, activeRun)
+          }
           return false
         }
       }
@@ -2004,6 +2145,7 @@ export class AgentRuntimePresenter implements IAgentImplementation {
       this.throwIfAbortRequested(preStreamAbortSignal)
       const { generationId, result } = await this.runStreamForMessage({
         sessionId,
+        runId: activeRun?.id,
         messageId,
         messages: resumeContext,
         projectDir,
@@ -2013,6 +2155,9 @@ export class AgentRuntimePresenter implements IAgentImplementation {
       })
       try {
         this.applyProcessResultStatus(sessionId, result, generationId)
+        if (activeRun && this.isActiveGeneration(sessionId, generationId)) {
+          activeRun = this.applyRunResultStatus(sessionId, activeRun.id, result)
+        }
       } finally {
         this.clearActiveGeneration(sessionId, generationId)
       }
@@ -2034,6 +2179,10 @@ export class AgentRuntimePresenter implements IAgentImplementation {
           stopReason: 'user_stop',
           errorMessage: 'common.error.userCanceledGeneration'
         })
+        if (activeRun) {
+          activeRun = this.runStateManager.markAborted(activeRun.id)
+          this.emitRunSnapshotUpdate(sessionId, activeRun)
+        }
         this.setSessionStatus(sessionId, 'idle')
         return false
       }
@@ -2041,6 +2190,10 @@ export class AgentRuntimePresenter implements IAgentImplementation {
       const blocks = buildTerminalErrorBlocks(initialBlocks, errorMessage)
       this.messageStore.setMessageError(messageId, blocks)
       this.emitMessageRefresh(sessionId, messageId)
+      if (activeRun) {
+        activeRun = this.runStateManager.markFailed(activeRun.id)
+        this.emitRunSnapshotUpdate(sessionId, activeRun)
+      }
       this.setSessionStatus(sessionId, 'error')
       throw error
     } finally {
@@ -3774,6 +3927,110 @@ export class AgentRuntimePresenter implements IAgentImplementation {
     this.emitCompactionState(sessionId, this.buildIdleCompactionState())
   }
 
+  private emitRunSnapshotUpdate(sessionId: string, run: HarnessRun | null): void {
+    const snapshot = this.runSnapshotBuilder.build(run)
+    eventBus.sendToRenderer(SESSION_EVENTS.RUN_SNAPSHOT_UPDATED, SendTarget.ALL_WINDOWS, {
+      sessionId,
+      snapshot
+    })
+  }
+
+  private recordPermissionWait(
+    runId: string,
+    params: {
+      sessionId: string
+      messageId: string
+      toolCallId: string
+      toolName: string
+      toolArgs: string
+      permission: NonNullable<PendingToolInteraction['permission']>
+    }
+  ): void {
+    const checkpoint: RunCheckpoint = {
+      id: nanoid(),
+      runId,
+      sessionId: params.sessionId,
+      checkpointType: 'before_wait',
+      label: 'Before permission wait',
+      payloadJson: JSON.stringify({
+        messageId: params.messageId,
+        toolCallId: params.toolCallId,
+        toolName: params.toolName,
+        toolArgs: params.toolArgs,
+        permission: params.permission
+      }),
+      createdAt: Date.now()
+    }
+    const waitStep: RunStepRecord = {
+      id: nanoid(),
+      runId,
+      sessionId: params.sessionId,
+      messageId: params.messageId,
+      toolCallId: params.toolCallId,
+      kind: 'wait',
+      title: params.permission.description,
+      status: 'pending',
+      payloadJson: checkpoint.payloadJson,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      completedAt: null
+    }
+
+    this.runCheckpointStore.create(checkpoint)
+    this.runStepStore.create(waitStep)
+    const run = this.runStateManager.markWaitingPermission(runId, checkpoint.id)
+    this.emitRunSnapshotUpdate(params.sessionId, run)
+  }
+
+  private resolvePendingPermissionWaitStep(runId: string): RunStepRecord | null {
+    return this.runStepStore.getLatestPendingWaitStep(runId)
+  }
+
+  private recordPermissionDecision(
+    runId: string,
+    params: {
+      sessionId: string
+      messageId: string
+      toolCallId: string
+      granted: boolean
+      permissionType: string
+    }
+  ): void {
+    const pendingWaitStep = this.resolvePendingPermissionWaitStep(runId)
+    const now = Date.now()
+
+    if (pendingWaitStep) {
+      this.runStepStore.update(pendingWaitStep.id, {
+        status: 'completed',
+        updatedAt: now,
+        completedAt: now
+      })
+    }
+
+    this.runStepStore.create({
+      id: nanoid(),
+      runId,
+      sessionId: params.sessionId,
+      messageId: params.messageId,
+      toolCallId: params.toolCallId,
+      kind: 'decision',
+      title: params.granted
+        ? `Permission granted (${params.permissionType})`
+        : `Permission denied (${params.permissionType})`,
+      status: 'completed',
+      payloadJson: JSON.stringify({
+        granted: params.granted,
+        permissionType: params.permissionType
+      }),
+      createdAt: now,
+      updatedAt: now,
+      completedAt: now
+    })
+
+    const run = this.runStateManager.markRecovering(runId)
+    this.emitRunSnapshotUpdate(params.sessionId, run)
+  }
+
   private invalidateSummaryIfNeeded(sessionId: string, orderSeq: number): void {
     const summaryState = this.sessionStore.getSummaryState(sessionId)
     if (orderSeq < summaryState.summaryCursorOrderSeq) {
@@ -3830,6 +4087,20 @@ export class AgentRuntimePresenter implements IAgentImplementation {
     } catch (error) {
       console.warn('[DeepChatAgent] Failed to emit internal message refresh:', error)
     }
+  }
+
+  private buildRunTitle(text: string): string {
+    const normalized = text.replace(/\s+/g, ' ').trim()
+    if (!normalized) {
+      return 'Current turn'
+    }
+
+    return normalized.slice(0, 72).trimEnd()
+  }
+
+  private buildRunGoal(text: string): string {
+    const normalized = text.replace(/\s+/g, ' ').trim()
+    return normalized || 'Current turn'
   }
 
   private normalizeProjectDir(projectDir?: string | null): string | null {

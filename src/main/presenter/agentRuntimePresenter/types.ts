@@ -62,7 +62,7 @@ export interface ProcessHooks {
     error?: string
   }) => void
   onPermissionRequest?: (
-    permission: Record<string, unknown>,
+    permission: NonNullable<PendingToolInteraction['permission']>,
     tool: {
       callId?: string
       name?: string

@@ -50,6 +50,7 @@ function createMockDeepChatAgent() {
       modelId: 'gpt-4',
       permissionMode: 'full_access'
     }),
+    getActiveRunSnapshot: vi.fn().mockResolvedValue(null),
     processMessage: vi.fn().mockResolvedValue(undefined),
     cancelGeneration: vi.fn().mockResolvedValue(undefined),
     clearMessages: vi.fn().mockResolvedValue(undefined),
@@ -662,6 +663,66 @@ describe('AgentSessionPresenter', () => {
       expect(deepChatAgent.destroySession).toHaveBeenCalledWith('mock-session-id')
       expect(sqlitePresenter.newSessionsTable.delete).toHaveBeenCalledWith('mock-session-id')
       expect(deepChatAgent.processMessage).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('getActiveRunSnapshot', () => {
+    it('returns the active run snapshot from the session agent', async () => {
+      sqlitePresenter.newSessionsTable.get.mockReturnValue({
+        id: 's-run',
+        agent_id: 'deepchat',
+        title: 'Track the active run',
+        project_dir: null,
+        is_pinned: 0,
+        is_draft: 0,
+        session_kind: 'regular',
+        created_at: 1,
+        updated_at: 1
+      })
+      deepChatAgent.getActiveRunSnapshot.mockResolvedValueOnce({
+        runId: 'run-1',
+        sessionId: 's-run',
+        title: 'Track the active run',
+        goal: 'Track the active run',
+        status: 'ready',
+        stage: 'verify',
+        progressDone: 0,
+        progressTotal: 0,
+        tickerSummary: 'Track the active run',
+        completionAcknowledged: false,
+        updatedAt: 1
+      })
+
+      await expect(presenter.getActiveRunSnapshot('s-run')).resolves.toMatchObject({
+        runId: 'run-1',
+        sessionId: 's-run',
+        status: 'ready'
+      })
+    })
+
+    it('returns null when the session agent does not expose run snapshots', async () => {
+      const legacyAgent = createMockDeepChatAgent()
+      delete legacyAgent.getActiveRunSnapshot
+      presenter = new AgentSessionPresenter(
+        legacyAgent as any,
+        llmProviderPresenter,
+        configPresenter,
+        sqlitePresenter,
+        skillPresenter
+      )
+      sqlitePresenter.newSessionsTable.get.mockReturnValue({
+        id: 's-run',
+        agent_id: 'deepchat',
+        title: 'No run snapshot support',
+        project_dir: null,
+        is_pinned: 0,
+        is_draft: 0,
+        session_kind: 'regular',
+        created_at: 1,
+        updated_at: 1
+      })
+
+      await expect(presenter.getActiveRunSnapshot('s-run')).resolves.toBeNull()
     })
   })
 
