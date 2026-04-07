@@ -56,7 +56,7 @@ import {
   FilePermissionService,
   SettingsPermissionService
 } from './permission'
-import type { AgentToolRuntimePort } from './toolPresenter/runtimePorts'
+import type { AgentToolRuntimePort, RuntimeContextHandoff } from './toolPresenter/runtimePorts'
 
 import { ConversationExporterService } from './exporter'
 import { SkillPresenter } from './skillPresenter'
@@ -307,6 +307,87 @@ export class Presenter implements IPresenter {
           subagentEnabled: session.subagentEnabled,
           subagentMeta: session.subagentMeta ?? null,
           availableSubagentSlots
+        }
+      },
+      readRuntimeContext: async (conversationId, options) => {
+        const session = await this.agentSessionPresenter?.getSession(conversationId)
+        if (!session) {
+          throw new Error(`Conversation ${conversationId} not found`)
+        }
+        const sqlitePresenter = this.sqlitePresenter as unknown as SQLitePresenter
+
+        const requestedSections =
+          options?.sections && options.sections.length > 0
+            ? new Set(options.sections)
+            : new Set(['run', 'memory', 'handoff'])
+        const snapshot =
+          requestedSections.has('run') &&
+          typeof this.agentSessionPresenter?.getActiveRunSnapshot === 'function'
+            ? await this.agentSessionPresenter.getActiveRunSnapshot(conversationId)
+            : null
+        const latestRun =
+          requestedSections.has('handoff') || requestedSections.has('run')
+            ? sqlitePresenter.deepchatRunsTable?.getLatestBySession(conversationId)
+            : undefined
+        const memories = requestedSections.has('memory')
+          ? (
+              sqlitePresenter.deepchatMemoryRecordsTable?.listBySession(conversationId, {
+                scopes: ['working', 'episodic', 'evidence'],
+                limit:
+                  typeof options?.memoryLimit === 'number'
+                    ? Math.max(1, Math.min(12, options.memoryLimit))
+                    : 6
+              }) ?? []
+            ).map((row) => ({
+              id: row.id,
+              scope: row.scope,
+              kind: row.kind,
+              summary: row.summary,
+              payloadUri: row.payload_uri,
+              createdAt: row.created_at
+            }))
+          : []
+
+        let handoff: RuntimeContextHandoff | null = null
+        if (requestedSections.has('handoff') && latestRun?.active_checkpoint_id) {
+          const checkpoint = sqlitePresenter.deepchatRunCheckpointsTable?.get(
+            latestRun.active_checkpoint_id
+          )
+          if (checkpoint) {
+            let markdown: string | null = null
+            if (checkpoint.payload_json) {
+              try {
+                const parsed = JSON.parse(checkpoint.payload_json) as { handoffMarkdown?: unknown }
+                if (
+                  typeof parsed.handoffMarkdown === 'string' &&
+                  parsed.handoffMarkdown.trim().length > 0
+                ) {
+                  markdown = parsed.handoffMarkdown.trim()
+                }
+              } catch (error) {
+                console.warn('[Presenter] Failed to parse runtime handoff payload:', {
+                  conversationId,
+                  checkpointId: checkpoint.id,
+                  error
+                })
+              }
+            }
+
+            handoff = {
+              checkpointId: checkpoint.id,
+              checkpointType: checkpoint.checkpoint_type,
+              label: checkpoint.label,
+              markdown,
+              createdAt: checkpoint.created_at
+            }
+          }
+        }
+
+        return {
+          sessionId: conversationId,
+          snapshot,
+          memories,
+          handoff
         }
       },
       createSubagentSession: async (input) => {

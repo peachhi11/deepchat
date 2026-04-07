@@ -336,6 +336,7 @@ export class ToolPresenter implements IToolPresenter {
     const sections = [
       this.buildFilesystemPrompt(toolNames, offloadPath),
       this.buildQuestionPrompt(toolNames),
+      this.buildRuntimeStatePrompt(toolNames),
       this.buildSkillsPrompt(toolNames),
       this.buildSettingsPrompt(groupedTools.get('deepchat-settings') ?? []),
       this.buildYoBrowserPrompt(groupedTools.get('yobrowser') ?? [])
@@ -442,6 +443,19 @@ export class ToolPresenter implements IToolPresenter {
       `Ask exactly one question per \`${QUESTION_TOOL_NAME}\` call. If multiple clarifications are needed, split them into multiple tool calls.`,
       'Use only the existing fields `header`, `question`, `options`, `multiple`, and `custom`.',
       'Do not send `questions`, `allowOther`, or stringified `options` JSON.'
+    ].join('\n')
+  }
+
+  private buildRuntimeStatePrompt(toolNames: Set<string>): string {
+    if (!toolNames.has('read_runtime_context')) {
+      return ''
+    }
+
+    return [
+      '## Runtime State',
+      'Durable run state, checkpoint handoffs, and recent memory are not injected into the prompt by default.',
+      'Use `read_runtime_context` when you need current run status, recent durable memory, or the active checkpoint handoff.',
+      'Request only the sections you need with `sections`, and keep `memory_limit` small unless you need more history.'
     ].join('\n')
   }
 

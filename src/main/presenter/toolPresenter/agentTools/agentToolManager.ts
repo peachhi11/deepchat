@@ -26,6 +26,7 @@ import {
   SUBAGENT_ORCHESTRATOR_TOOL_NAME,
   SubagentOrchestratorTool
 } from './subagentOrchestratorTool'
+import type { RuntimeContextReadResult, RuntimeContextSection } from '../runtimePorts'
 
 // Consider moving to a shared handlers location in future refactoring
 import {
@@ -90,6 +91,8 @@ const throwIfAbortRequested = (signal?: AbortSignal): void => {
 
 const isAbortError = (error: unknown): boolean =>
   error instanceof Error && (error.name === 'AbortError' || error.name === 'CanceledError')
+
+const RUNTIME_CONTEXT_TOOL_NAME = 'read_runtime_context'
 
 export class AgentToolManager {
   private static readonly YO_BROWSER_TOOL_NAME_SET = new Set<string>(YO_BROWSER_TOOL_NAMES)
@@ -229,6 +232,24 @@ export class AgentToolManager {
     })
   }
 
+  private readonly runtimeContextSchema = z.object({
+    sections: z
+      .array(z.enum(['run', 'memory', 'handoff']))
+      .min(1)
+      .max(3)
+      .optional()
+      .describe(
+        'Optional list of runtime state sections to read. Supported values: run, memory, handoff.'
+      ),
+    memory_limit: z
+      .number()
+      .int()
+      .min(1)
+      .max(12)
+      .optional()
+      .describe('Maximum number of recent durable memory items to return when memory is requested.')
+  })
+
   private readonly skillSchemas = {
     skill_list: z.object({}),
     skill_run: z.object({
@@ -321,6 +342,11 @@ export class AgentToolManager {
 
     // 2. Built-in question tool (all modes)
     defs.push(...this.getQuestionToolDefinitions())
+
+    // 2.25. Runtime state tool (deepchat regular sessions only)
+    if (isAgentMode && context.conversationId && this.runtimePort.readRuntimeContext) {
+      defs.push(this.getRuntimeContextToolDefinition())
+    }
 
     // 2.5. Subagent orchestration tool (deepchat regular sessions only)
     if (isAgentMode && context.conversationId && this.subagentOrchestratorTool) {
@@ -421,6 +447,10 @@ export class AgentToolManager {
       }
 
       return await this.subagentOrchestratorTool.call(args, conversationId, options)
+    }
+
+    if (toolName === RUNTIME_CONTEXT_TOOL_NAME) {
+      return await this.callRuntimeContextTool(args, conversationId)
     }
 
     // Route to process tool
@@ -601,6 +631,27 @@ export class AgentToolManager {
     ]
   }
 
+  private getRuntimeContextToolDefinition(): MCPToolDefinition {
+    return {
+      type: 'function',
+      function: {
+        name: RUNTIME_CONTEXT_TOOL_NAME,
+        description:
+          'Read durable runtime state on demand. Use this when you need the current run snapshot, recent durable memory, or the active checkpoint handoff instead of assuming that state was injected into the prompt.',
+        parameters: zodToJsonSchema(this.runtimeContextSchema) as {
+          type: string
+          properties: Record<string, unknown>
+          required?: string[]
+        }
+      },
+      server: {
+        name: 'agent-runtime',
+        icons: '🧠',
+        description: 'Agent runtime state tools'
+      }
+    }
+  }
+
   private isFileSystemTool(toolName: string): boolean {
     const filesystemTools = ['read', 'write', 'ls', 'edit', 'find', 'grep', 'exec', 'process']
     return filesystemTools.includes(toolName)
@@ -608,6 +659,90 @@ export class AgentToolManager {
 
   private isProcessTool(toolName: string): boolean {
     return toolName === 'process'
+  }
+
+  private async callRuntimeContextTool(
+    args: Record<string, unknown>,
+    conversationId?: string
+  ): Promise<AgentToolCallResult> {
+    if (!conversationId) {
+      throw new Error(`${RUNTIME_CONTEXT_TOOL_NAME} requires a conversation ID`)
+    }
+    if (!this.runtimePort.readRuntimeContext) {
+      throw new Error(`${RUNTIME_CONTEXT_TOOL_NAME} is not available in the current runtime`)
+    }
+
+    const validationResult = this.runtimeContextSchema.safeParse(args)
+    if (!validationResult.success) {
+      throw new Error(
+        `Invalid arguments for ${RUNTIME_CONTEXT_TOOL_NAME}: ${validationResult.error.message}`
+      )
+    }
+
+    const sections = validationResult.data.sections ?? ['run', 'memory', 'handoff']
+    const result = await this.runtimePort.readRuntimeContext(conversationId, {
+      sections,
+      memoryLimit: validationResult.data.memory_limit
+    })
+
+    return {
+      content: this.formatRuntimeContextResult(result, sections)
+    }
+  }
+
+  private formatRuntimeContextResult(
+    result: RuntimeContextReadResult,
+    sections: RuntimeContextSection[]
+  ): string {
+    const lines = ['# Runtime Context', `Session: ${result.sessionId}`]
+
+    if (sections.includes('run')) {
+      lines.push('', '## Run')
+      if (result.snapshot) {
+        lines.push(`- Title: ${result.snapshot.title}`)
+        lines.push(`- Goal: ${result.snapshot.goal}`)
+        lines.push(`- Status: ${result.snapshot.status}`)
+        lines.push(`- Stage: ${result.snapshot.stage}`)
+        lines.push(`- Summary: ${result.snapshot.tickerSummary}`)
+        if (result.snapshot.blockerSummary) {
+          lines.push(`- Blocker: ${result.snapshot.blockerSummary}`)
+        }
+        if (result.snapshot.activeCheckpointLabel) {
+          lines.push(`- Active checkpoint: ${result.snapshot.activeCheckpointLabel}`)
+        }
+      } else {
+        lines.push('- No active durable run snapshot.')
+      }
+    }
+
+    if (sections.includes('memory')) {
+      lines.push('', '## Recent Memory')
+      if (result.memories.length === 0) {
+        lines.push('- No recent durable memory.')
+      } else {
+        for (const memory of result.memories) {
+          const suffix = memory.payloadUri ? ` (${memory.payloadUri})` : ''
+          lines.push(`- [${memory.scope}/${memory.kind}] ${memory.summary}${suffix}`)
+        }
+      }
+    }
+
+    if (sections.includes('handoff')) {
+      lines.push('', '## Handoff')
+      if (result.handoff?.markdown) {
+        lines.push(`- Checkpoint: ${result.handoff.label} (${result.handoff.checkpointType})`)
+        lines.push('```md')
+        lines.push(result.handoff.markdown)
+        lines.push('```')
+      } else if (result.handoff) {
+        lines.push(`- Checkpoint: ${result.handoff.label} (${result.handoff.checkpointType})`)
+        lines.push('- No structured handoff markdown is stored on the active checkpoint.')
+      } else {
+        lines.push('- No active checkpoint handoff.')
+      }
+    }
+
+    return lines.join('\n')
   }
 
   private async callProcessTool(

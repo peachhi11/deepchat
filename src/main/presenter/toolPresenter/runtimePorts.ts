@@ -7,7 +7,11 @@ import type {
 import type {
   DeepChatSubagentMeta,
   DeepChatSubagentSlot,
+  MemoryKind,
+  MemoryScope,
   PermissionMode,
+  RunCheckpointType,
+  RunSnapshot,
   SendMessageInput,
   SessionGenerationSettings,
   SessionKind
@@ -49,9 +53,42 @@ export interface CreateSubagentSessionInput {
   activeSkills?: string[]
 }
 
+export type RuntimeContextSection = 'run' | 'memory' | 'handoff'
+
+export interface RuntimeContextMemoryItem {
+  id: string
+  scope: MemoryScope
+  kind: MemoryKind
+  summary: string
+  payloadUri: string | null
+  createdAt: number
+}
+
+export interface RuntimeContextHandoff {
+  checkpointId: string
+  checkpointType: RunCheckpointType
+  label: string
+  markdown: string | null
+  createdAt: number
+}
+
+export interface RuntimeContextReadResult {
+  sessionId: string
+  snapshot: RunSnapshot | null
+  memories: RuntimeContextMemoryItem[]
+  handoff: RuntimeContextHandoff | null
+}
+
 export interface AgentToolRuntimePort {
   resolveConversationWorkdir(conversationId: string): Promise<string | null>
   resolveConversationSessionInfo(conversationId: string): Promise<ConversationSessionInfo | null>
+  readRuntimeContext?(
+    conversationId: string,
+    options?: {
+      sections?: RuntimeContextSection[]
+      memoryLimit?: number
+    }
+  ): Promise<RuntimeContextReadResult>
   createSubagentSession(input: CreateSubagentSessionInput): Promise<ConversationSessionInfo | null>
   sendConversationMessage(conversationId: string, content: string | SendMessageInput): Promise<void>
   cancelConversation(conversationId: string): Promise<void>

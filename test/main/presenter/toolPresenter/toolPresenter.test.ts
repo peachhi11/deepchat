@@ -410,6 +410,84 @@ describe('ToolPresenter', () => {
     )
   })
 
+  it('includes runtime state guidance only when read_runtime_context is enabled', () => {
+    const mcpPresenter = {
+      getAllToolDefinitions: vi.fn().mockResolvedValue([]),
+      callTool: vi.fn()
+    } as any
+    const configPresenter = {
+      getSkillsEnabled: vi.fn().mockReturnValue(false),
+      getSkillsPath: vi.fn().mockReturnValue('C:\\\\skills'),
+      getModelConfig: vi.fn()
+    }
+
+    const toolPresenter = new ToolPresenter({
+      mcpPresenter,
+      configPresenter: configPresenter as any,
+      commandPermissionHandler: new CommandPermissionService(),
+      agentToolRuntime: {
+        resolveConversationWorkdir: vi.fn().mockResolvedValue(null),
+        resolveConversationSessionInfo: vi.fn().mockResolvedValue(null),
+        getSkillPresenter: () =>
+          ({
+            getActiveSkills: vi.fn().mockResolvedValue([]),
+            getActiveSkillsAllowedTools: vi.fn().mockResolvedValue([]),
+            listSkillScripts: vi.fn().mockResolvedValue([]),
+            getSkillExtension: vi.fn().mockResolvedValue({
+              version: 1,
+              env: {},
+              runtimePolicy: { python: 'auto', node: 'auto' },
+              scriptOverrides: {}
+            })
+          }) as any,
+        getYoBrowserToolHandler: () => ({
+          getToolDefinitions: vi.fn().mockReturnValue([]),
+          callTool: vi.fn()
+        }),
+        getFilePresenter: () => ({
+          getMimeType: vi.fn(),
+          prepareFileCompletely: vi.fn()
+        }),
+        getLlmProviderPresenter: () => ({
+          executeWithRateLimit: vi.fn().mockResolvedValue(undefined),
+          generateCompletionStandalone: vi.fn()
+        }),
+        createSettingsWindow: vi.fn(),
+        sendToWindow: vi.fn().mockReturnValue(true),
+        getApprovedFilePaths: vi.fn().mockReturnValue([]),
+        consumeSettingsApproval: vi.fn().mockReturnValue(false)
+      } as any
+    })
+
+    const withoutRuntimeState = toolPresenter.buildToolSystemPrompt({
+      conversationId: 'conv-1',
+      toolDefinitions: [
+        {
+          ...buildToolDefinition('read', 'agent-filesystem'),
+          source: 'agent'
+        }
+      ]
+    })
+    const withRuntimeState = toolPresenter.buildToolSystemPrompt({
+      conversationId: 'conv-1',
+      toolDefinitions: [
+        {
+          ...buildToolDefinition('read_runtime_context', 'agent-runtime'),
+          source: 'agent'
+        }
+      ]
+    })
+
+    expect(withoutRuntimeState).not.toContain('## Runtime State')
+    expect(withRuntimeState).toContain('## Runtime State')
+    expect(withRuntimeState).toContain(
+      'Durable run state, checkpoint handoffs, and recent memory are not injected into the prompt by default.'
+    )
+    expect(withRuntimeState).toContain(
+      'Use `read_runtime_context` when you need current run status, recent durable memory, or the active checkpoint handoff.'
+    )
+  })
+
   it('describes the question schema and returns actionable validation errors', async () => {
     const mcpPresenter = {
       getAllToolDefinitions: vi.fn().mockResolvedValue([]),

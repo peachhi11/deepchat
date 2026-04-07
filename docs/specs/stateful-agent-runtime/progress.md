@@ -192,6 +192,24 @@
   - system prompt 只保留稳定 base prompt + summary
   - memory / handoff 只保留 durable truth，等待后续改成 resource / tool 按需读取
 
+## Step 6 按需读取面
+
+- 已新增最小 runtime state tool：
+  - tool 名称：`read_runtime_context`
+  - 可按需读取 `run` / `memory` / `handoff` 三个 section
+- 读取链路：
+  - `ToolPresenter.buildToolSystemPrompt()` 现在会明确告诉模型 durable runtime state 默认不注入 prompt
+  - `AgentToolManager` 会在 regular DeepChat session 中暴露 `read_runtime_context`
+  - `Presenter` 会从 durable tables 读取 active run snapshot、recent memory、active checkpoint handoff
+- 当前读取内容：
+  - `run`: `RunSnapshot` 里的 title / goal / status / stage / blocker / active checkpoint
+  - `memory`: recent `working` / `episodic` / `evidence` memory
+  - `handoff`: active checkpoint 的 `handoffMarkdown`
+- 当前刻意不做：
+  - file-style 虚拟挂载
+  - 多 checkpoint lineage 查询
+  - trace / task graph 查询
+
 ## 验证记录
 
 - `pnpm exec vitest --run test/main/presenter/agentRuntimePresenter/runStore.test.ts test/main/presenter/sqlitePresenter.test.ts test/main/presenter/agentRuntimePresenter/agentRuntimePresenter.test.ts test/main/presenter/remoteControlPresenter/remoteConversationRunner.test.ts`
@@ -239,6 +257,9 @@
 - `pnpm exec vitest --run test/main/presenter/agentRuntimePresenter/goalPlanner.test.ts test/main/presenter/agentRuntimePresenter/agentRuntimePresenter.test.ts`
   - 结果：`2 passed`
   - 说明：已验证 direct prompt injection 已撤掉、planner 输出会驱动 run title / goal，并写入 durable decision step
+- `pnpm exec vitest --run test/main/presenter/toolPresenter/agentTools/agentToolManagerRead.test.ts test/main/presenter/toolPresenter/toolPresenter.test.ts`
+  - 结果：`2 passed`
+  - 说明：已验证 `read_runtime_context` 会在 tool list 中暴露、可读取 durable run/memory/handoff，且 tool prompt 会提示模型按需读取 runtime state
 - `pnpm run format`
   - 结果：通过
 - `pnpm run i18n`

@@ -39,6 +39,7 @@ describe('AgentToolManager read routing', () => {
   }
   let resolveConversationWorkdir: ReturnType<typeof vi.fn>
   let resolveConversationSessionInfo: ReturnType<typeof vi.fn>
+  let readRuntimeContext: ReturnType<typeof vi.fn>
 
   beforeEach(async () => {
     vi.clearAllMocks()
@@ -57,6 +58,44 @@ describe('AgentToolManager read routing', () => {
       providerId: 'openai',
       modelId: 'gpt-4'
     })
+    readRuntimeContext = vi.fn().mockResolvedValue({
+      sessionId: 'conv1',
+      snapshot: {
+        runId: 'run-1',
+        sessionId: 'conv1',
+        title: 'Refactor checkpoint flow',
+        goal: 'Refactor checkpoint flow and verify behavior',
+        status: 'ready',
+        stage: 'verify',
+        progressDone: 0,
+        progressTotal: 0,
+        currentTaskId: null,
+        currentTaskTitle: null,
+        activeCheckpointId: 'cp-1',
+        activeCheckpointLabel: 'Before compaction',
+        blockerSummary: null,
+        tickerSummary: 'Refactor checkpoint flow',
+        completionAcknowledged: false,
+        updatedAt: 1
+      },
+      memories: [
+        {
+          id: 'memory-1',
+          scope: 'evidence',
+          kind: 'artifact',
+          summary: 'read produced evidence: README content',
+          payloadUri: '/tmp/readme.txt',
+          createdAt: 1
+        }
+      ],
+      handoff: {
+        checkpointId: 'cp-1',
+        checkpointType: 'before_compaction',
+        label: 'Before compaction',
+        markdown: '# Structured Handoff\n\n## Current Goal\nRefactor checkpoint flow',
+        createdAt: 1
+      }
+    })
     configPresenter = {
       getSkillsEnabled: () => false,
       getSkillsPath: () => workspaceDir,
@@ -74,6 +113,7 @@ describe('AgentToolManager read routing', () => {
       runtimePort: {
         resolveConversationWorkdir,
         resolveConversationSessionInfo,
+        readRuntimeContext,
         getSkillPresenter: () =>
           ({
             getActiveSkills: vi.fn().mockResolvedValue([]),
@@ -98,6 +138,17 @@ describe('AgentToolManager read routing', () => {
         consumeSettingsApproval: vi.fn().mockReturnValue(false)
       }
     })
+  })
+
+  it('exposes the runtime context tool when the conversation runtime is available', async () => {
+    const defs = await manager.getAllToolDefinitions({
+      chatMode: 'agent',
+      supportsVision: false,
+      agentWorkspacePath: workspaceDir,
+      conversationId: 'conv1'
+    })
+
+    expect(defs.some((def) => def.function.name === 'read_runtime_context')).toBe(true)
   })
 
   it('uses raw read for text/code files', async () => {
@@ -263,6 +314,31 @@ describe('AgentToolManager read routing', () => {
       })
     )
     expect(llmProviderPresenter.generateCompletionStandalone).not.toHaveBeenCalled()
+  })
+
+  it('reads durable runtime context on demand', async () => {
+    const result = (await manager.callTool(
+      'read_runtime_context',
+      {
+        sections: ['run', 'memory', 'handoff'],
+        memory_limit: 2
+      },
+      'conv1'
+    )) as {
+      content: string
+    }
+
+    expect(readRuntimeContext).toHaveBeenCalledWith('conv1', {
+      sections: ['run', 'memory', 'handoff'],
+      memoryLimit: 2
+    })
+    expect(result.content).toContain('# Runtime Context')
+    expect(result.content).toContain('## Run')
+    expect(result.content).toContain('Refactor checkpoint flow')
+    expect(result.content).toContain('## Recent Memory')
+    expect(result.content).toContain('read produced evidence: README content')
+    expect(result.content).toContain('## Handoff')
+    expect(result.content).toContain('# Structured Handoff')
   })
 
   it('passes abort signals into vision target resolution', async () => {

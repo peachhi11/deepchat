@@ -87,7 +87,7 @@
 - [ ] 实现 `working` / `episodic` / `evidence` 首轮写入策略
 - [ ] 实现 `confidence` / `freshness` / `supersedes` 字段约束
 - [ ] 为 `semantic` / `procedural` 建立严格写入门槛
-- [ ] 将 memory / handoff 以 runtime resource / tool 形式按需暴露
+- [x] 将 memory / handoff 以 runtime resource / tool 形式按需暴露（v1: `read_runtime_context`）
 - [ ] working set 改为 state-aware retrieval 构建（已撤回 direct prompt injection，下一步改为按需读取）
 
 ## T6 Observability baseline
