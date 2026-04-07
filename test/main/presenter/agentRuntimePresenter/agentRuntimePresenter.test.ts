@@ -868,6 +868,50 @@ describe('AgentRuntimePresenter', () => {
       )
     })
 
+    it('includes recent memory inside failure handoff checkpoints', async () => {
+      ;(processStream as ReturnType<typeof vi.fn>)
+        .mockImplementationOnce(async (params) => {
+          params.hooks?.onPreToolUse?.({
+            callId: 'tool-1',
+            name: 'read',
+            params: '{"path":"README.md"}',
+            effectClass: 'read'
+          })
+          params.hooks?.onPostToolUse?.({
+            callId: 'tool-1',
+            name: 'read',
+            params: '{"path":"README.md"}',
+            response: 'README content',
+            effectClass: 'read',
+            evidence: true
+          })
+
+          return {
+            status: 'completed',
+            stopReason: 'complete'
+          }
+        })
+        .mockResolvedValueOnce({
+          status: 'error',
+          stopReason: 'max_tool_calls',
+          errorMessage: 'Max tool call limit reached (129 > 128)',
+          terminalError: 'Max tool call limit reached (129 > 128)'
+        })
+
+      await agent.initSession('s1', { providerId: 'openai', modelId: 'gpt-4' })
+      await agent.processMessage('s1', 'Inspect the repository readme')
+      await agent.processMessage('s1', 'Loop until failure')
+
+      const failureCheckpoint = sqlitePresenter.deepchatRunCheckpointsTable.insert.mock.calls
+        .map(([row]: [Record<string, unknown>]) => row)
+        .find((row) => row.checkpointType === 'failure')
+      const failureHandoff = JSON.parse(failureCheckpoint?.payloadJson as string).handoffMarkdown
+
+      expect(failureHandoff).toContain('## Recent Memory')
+      expect(failureHandoff).toContain('read produced evidence: README content')
+      expect(failureHandoff).toContain('[evidence]')
+    })
+
     it('injects recent evidence memory into the next-turn system prompt', async () => {
       ;(processStream as ReturnType<typeof vi.fn>)
         .mockImplementationOnce(async (params) => {

@@ -171,9 +171,10 @@
 - 当前已经接上的最小 consumer：
   - `processMessage()` 会把 recent episodic/evidence memory 组装进 `## Working Memory`
   - `resumeAssistantMessage()` 也会带上同一份 state-aware working set
+- 当前已经接上的最小 handoff consumer：
+  - `before_compaction` / `before_reset` / `failure` checkpoint 的 handoff markdown 会带 recent episodic/evidence memory
 - 当前刻意还没做的部分：
   - `semantic` / `procedural` memory gate
-  - handoff builder 读取 recent memory
   - 更强的 working set 裁剪 /排序策略
 
 ## 验证记录
@@ -217,6 +218,9 @@
 - `pnpm exec vitest --run test/main/presenter/agentRuntimePresenter/retrievalPlanner.test.ts test/main/presenter/agentRuntimePresenter/agentRuntimePresenter.test.ts`
   - 结果：`2 passed`
   - 说明：Step 6 第二刀的 retrieval planner、next-turn working memory prompt 注入已通过 main 定向测试
+- `pnpm exec vitest --run test/main/presenter/agentRuntimePresenter/handoffBuilder.test.ts test/main/presenter/agentRuntimePresenter/retrievalPlanner.test.ts test/main/presenter/agentRuntimePresenter/agentRuntimePresenter.test.ts`
+  - 结果：`3 passed`
+  - 说明：Step 6 第三刀的 handoff memory 注入、working memory retrieval、failure handoff memory 回归都已通过 main 定向测试
 - `pnpm run format`
   - 结果：通过
 - `pnpm run i18n`
@@ -232,5 +236,5 @@
 继续 Step 6
 
 - 细化 working set 的裁剪 / 排序 / scope policy
-- 决定先把 recent memory 接进 handoff builder，还是先补更多 producer
+- 继续补更多 high-signal producer
 - 之后再考虑 semantic / procedural 的严格 gate

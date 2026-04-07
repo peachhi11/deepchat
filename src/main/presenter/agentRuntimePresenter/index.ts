@@ -4337,6 +4337,13 @@ export class AgentRuntimePresenter implements IAgentImplementation {
     return JSON.stringify(payload)
   }
 
+  private listRecentHandoffMemories(sessionId: string) {
+    return this.memoryManager.listBySession(sessionId, {
+      scopes: ['episodic', 'evidence'],
+      limit: 4
+    })
+  }
+
   private recordCompactionCheckpoint(
     sessionId: string,
     runId: string,
@@ -4367,7 +4374,8 @@ export class AgentRuntimePresenter implements IAgentImplementation {
           summaryState: intent.previousState,
           checkpointLabel: 'Before compaction',
           source: 'before_compaction',
-          nextStep: 'Continue the current run after summary compaction completes.'
+          nextStep: 'Continue the current run after summary compaction completes.',
+          recentMemories: this.listRecentHandoffMemories(sessionId)
         })
       }),
       createdAt: Date.now()
@@ -4411,7 +4419,8 @@ export class AgentRuntimePresenter implements IAgentImplementation {
           checkpointLabel: 'Before reset',
           source: 'before_reset',
           nextStep:
-            'Restart the current run from the selected message context with a fresh execution pass.'
+            'Restart the current run from the selected message context with a fresh execution pass.',
+          recentMemories: this.listRecentHandoffMemories(sessionId)
         })
       }),
       createdAt: Date.now()
@@ -4565,7 +4574,8 @@ export class AgentRuntimePresenter implements IAgentImplementation {
             checkpointLabel: 'Failure checkpoint',
             source: 'failure',
             nextStep: 'Inspect the failure details and decide whether to retry, recover, or reset.',
-            errorMessage: params.errorMessage
+            errorMessage: params.errorMessage,
+            recentMemories: this.listRecentHandoffMemories(params.sessionId)
           })
         }),
         createdAt: now
