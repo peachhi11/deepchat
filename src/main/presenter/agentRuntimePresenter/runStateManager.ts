@@ -113,6 +113,19 @@ export class RunStateManager {
     })
   }
 
+  attachCheckpoint(runId: string, checkpointId: string, stage?: RunStage): HarnessRun | null {
+    const existing = this.runStore.get(runId)
+    if (!existing) {
+      return null
+    }
+
+    return this.updateRun(runId, {
+      status: existing.status,
+      stage: stage ?? existing.stage,
+      activeCheckpointId: checkpointId
+    })
+  }
+
   markFailed(runId: string): HarnessRun | null {
     return this.updateRun(runId, {
       status: 'failed',

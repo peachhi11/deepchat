@@ -10,6 +10,7 @@ import type {
   PermissionMode,
   QueuePendingInputOptions,
   RunCheckpoint,
+  RunStage,
   RunSnapshot,
   RunStepRecord,
   SendMessageInput,
@@ -52,6 +53,7 @@ import {
   fitMessagesToContextWindow
 } from './contextBuilder'
 import { appendSummarySection, CompactionService, type CompactionIntent } from './compactionService'
+import { buildRunHandoffMarkdown } from './handoffBuilder'
 import { buildPersistableMessageTracePayload } from './messageTracePayload'
 import { buildTerminalErrorBlocks, DeepChatMessageStore } from './messageStore'
 import { PendingInputCoordinator } from './pendingInputCoordinator'
@@ -524,6 +526,7 @@ export class AgentRuntimePresenter implements IAgentImplementation {
         summaryState = await this.applyCompactionIntent(sessionId, compactionIntent, {
           compactionMessageId,
           startedExternally: true,
+          runId: activeRun?.id,
           signal: preStreamAbortSignal
         })
       } else {
@@ -2154,6 +2157,7 @@ export class AgentRuntimePresenter implements IAgentImplementation {
       this.throwIfAbortRequested(preStreamAbortSignal)
       const summaryState = await this.resolveCompactionStateForResumeTurn({
         sessionId,
+        runId: activeRun?.id,
         messageId,
         providerId: state.providerId,
         modelId: state.modelId,
@@ -2165,7 +2169,10 @@ export class AgentRuntimePresenter implements IAgentImplementation {
         signal: preStreamAbortSignal
       })
       this.throwIfAbortRequested(preStreamAbortSignal)
-      const systemPrompt = appendSummarySection(baseSystemPrompt, summaryState.summaryText)
+      const systemPrompt = this.appendCheckpointHandoffSection(
+        appendSummarySection(baseSystemPrompt, summaryState.summaryText),
+        activeRun?.activeCheckpointId
+      )
       let resumeContext = buildResumeContext(
         sessionId,
         messageId,
@@ -3897,6 +3904,7 @@ export class AgentRuntimePresenter implements IAgentImplementation {
 
   private async resolveCompactionStateForResumeTurn(params: {
     sessionId: string
+    runId?: string
     messageId: string
     providerId: string
     modelId: string
@@ -3908,7 +3916,10 @@ export class AgentRuntimePresenter implements IAgentImplementation {
     signal?: AbortSignal
   }): Promise<SessionSummaryState> {
     const intent = await this.compactionService.prepareForResumeTurn(params)
-    return await this.applyCompactionIntent(params.sessionId, intent, { signal: params.signal })
+    return await this.applyCompactionIntent(params.sessionId, intent, {
+      signal: params.signal,
+      runId: params.runId
+    })
   }
 
   private async applyCompactionIntent(
@@ -3917,11 +3928,16 @@ export class AgentRuntimePresenter implements IAgentImplementation {
     options?: {
       compactionMessageId?: string
       startedExternally?: boolean
+      runId?: string
       signal?: AbortSignal
     }
   ): Promise<SessionSummaryState> {
     if (!intent) {
       return this.sessionStore.getSummaryState(sessionId)
+    }
+
+    if (options?.runId) {
+      this.recordCompactionCheckpoint(sessionId, options.runId, intent)
     }
 
     const compactionMessageId =
@@ -4033,6 +4049,46 @@ export class AgentRuntimePresenter implements IAgentImplementation {
     })
   }
 
+  private getCheckpointHandoffMarkdown(checkpointId?: string | null): string | null {
+    if (!checkpointId) {
+      return null
+    }
+
+    const checkpoint = this.runCheckpointStore.get(checkpointId)
+    if (!checkpoint?.payloadJson) {
+      return null
+    }
+
+    try {
+      const parsed = JSON.parse(checkpoint.payloadJson) as { handoffMarkdown?: unknown }
+      return typeof parsed.handoffMarkdown === 'string' && parsed.handoffMarkdown.trim()
+        ? parsed.handoffMarkdown.trim()
+        : null
+    } catch {
+      return null
+    }
+  }
+
+  private appendCheckpointHandoffSection(
+    systemPrompt: string,
+    checkpointId?: string | null
+  ): string {
+    const handoffMarkdown = this.getCheckpointHandoffMarkdown(checkpointId)
+    if (!handoffMarkdown) {
+      return systemPrompt
+    }
+
+    const handoffSection = [
+      '## Recovery Handoff',
+      'The structured checkpoint handoff below is durable runtime state. Use it to recover context before relying on transcript replay.',
+      '```md',
+      handoffMarkdown,
+      '```'
+    ].join('\n')
+
+    return [systemPrompt, handoffSection].filter(Boolean).join('\n\n')
+  }
+
   private recordPermissionWait(
     runId: string,
     params: {
@@ -4137,6 +4193,14 @@ export class AgentRuntimePresenter implements IAgentImplementation {
     return `${runId}:${kind}:${identity}`
   }
 
+  private buildDeterministicRunCheckpointId(
+    runId: string,
+    checkpointType: RunCheckpoint['checkpointType'],
+    identity: string
+  ): string {
+    return `${runId}:checkpoint:${checkpointType}:${identity}`
+  }
+
   private buildStepPayload(payload: Record<string, unknown>): string {
     return JSON.stringify(payload)
   }
@@ -4163,6 +4227,70 @@ export class AgentRuntimePresenter implements IAgentImplementation {
       updatedAt: step.updatedAt,
       completedAt: step.completedAt ?? null
     })
+  }
+
+  private createRunCheckpoint(checkpoint: RunCheckpoint): RunCheckpoint {
+    const existing = this.runCheckpointStore.get(checkpoint.id)
+    if (!existing) {
+      this.runCheckpointStore.create(checkpoint)
+      return checkpoint
+    }
+
+    return existing
+  }
+
+  private attachCheckpointToRun(
+    sessionId: string,
+    runId: string,
+    checkpointId: string,
+    stage?: RunStage
+  ): HarnessRun | null {
+    const run = this.runStateManager.attachCheckpoint(runId, checkpointId, stage)
+    this.emitRunSnapshotUpdate(sessionId, run)
+    return run
+  }
+
+  private buildCheckpointPayload(payload: Record<string, unknown>): string {
+    return JSON.stringify(payload)
+  }
+
+  private recordCompactionCheckpoint(
+    sessionId: string,
+    runId: string,
+    intent: CompactionIntent
+  ): void {
+    const run = this.runStore.get(runId)
+    if (!run) {
+      return
+    }
+
+    const checkpoint = this.createRunCheckpoint({
+      id: this.buildDeterministicRunCheckpointId(
+        runId,
+        'before_compaction',
+        String(intent.targetCursorOrderSeq)
+      ),
+      runId,
+      sessionId,
+      checkpointType: 'before_compaction',
+      label: 'Before compaction',
+      payloadJson: this.buildCheckpointPayload({
+        previousState: intent.previousState,
+        targetCursorOrderSeq: intent.targetCursorOrderSeq,
+        summaryBlockCount: intent.summaryBlocks.length,
+        reserveTokens: intent.reserveTokens,
+        handoffMarkdown: buildRunHandoffMarkdown({
+          run,
+          summaryState: intent.previousState,
+          checkpointLabel: 'Before compaction',
+          source: 'before_compaction',
+          nextStep: 'Continue the current run after summary compaction completes.'
+        })
+      }),
+      createdAt: Date.now()
+    })
+
+    this.attachCheckpointToRun(sessionId, runId, checkpoint.id, 'handoff')
   }
 
   private recordToolCallStep(
@@ -4272,6 +4400,33 @@ export class AgentRuntimePresenter implements IAgentImplementation {
   ): void {
     const now = Date.now()
     const identity = params.messageId?.trim() || params.source
+    const run = this.runStore.get(runId)
+
+    if (run) {
+      const summaryState = this.sessionStore.getSummaryState(params.sessionId)
+      const checkpoint = this.createRunCheckpoint({
+        id: this.buildDeterministicRunCheckpointId(runId, 'failure', identity),
+        runId,
+        sessionId: params.sessionId,
+        checkpointType: 'failure',
+        label: 'Failure checkpoint',
+        payloadJson: this.buildCheckpointPayload({
+          source: params.source,
+          stopReason: params.stopReason ?? 'error',
+          errorMessage: params.errorMessage,
+          handoffMarkdown: buildRunHandoffMarkdown({
+            run,
+            summaryState,
+            checkpointLabel: 'Failure checkpoint',
+            source: 'failure',
+            nextStep: 'Inspect the failure details and decide whether to retry, recover, or reset.',
+            errorMessage: params.errorMessage
+          })
+        }),
+        createdAt: now
+      })
+      this.attachCheckpointToRun(params.sessionId, runId, checkpoint.id)
+    }
 
     this.upsertRunStep({
       id: this.buildDeterministicRunStepId(runId, 'failure', identity),

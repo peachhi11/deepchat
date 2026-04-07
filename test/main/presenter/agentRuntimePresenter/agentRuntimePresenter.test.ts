@@ -805,6 +805,12 @@ describe('AgentRuntimePresenter', () => {
           title: 'Run failed: max tool calls'
         })
       )
+      expect(sqlitePresenter.deepchatRunCheckpointsTable.insert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          checkpointType: 'failure',
+          label: 'Failure checkpoint'
+        })
+      )
     })
 
     it('calls processStream with correct params', async () => {
@@ -2768,6 +2774,24 @@ describe('AgentRuntimePresenter', () => {
         summaryUpdatedAt: null
       })
 
+      expect(sqlitePresenter.deepchatRunCheckpointsTable.insert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          checkpointType: 'before_compaction',
+          label: 'Before compaction'
+        })
+      )
+      const compactionCheckpoint =
+        sqlitePresenter.deepchatRunCheckpointsTable.insert.mock.calls.find(
+          ([row]: any[]) => row?.checkpointType === 'before_compaction'
+        )?.[0]
+      expect(JSON.parse(compactionCheckpoint.payloadJson)).toMatchObject({
+        targetCursorOrderSeq: 3,
+        summaryBlockCount: 1
+      })
+      expect(JSON.parse(compactionCheckpoint.payloadJson).handoffMarkdown).toContain(
+        '# Structured Handoff'
+      )
+
       const finalizedCompaction =
         sqlitePresenter.deepchatMessagesTable.updateContentAndStatus.mock.calls.find(
           ([, , , metadata]: any[]) =>
@@ -3018,6 +3042,68 @@ describe('AgentRuntimePresenter', () => {
         })
       )
       expect(processStream).toHaveBeenCalledTimes(1)
+    })
+
+    it('injects checkpoint handoff markdown into the resume system prompt when available', async () => {
+      await agent.initSession('s1', { providerId: 'openai', modelId: 'gpt-4' })
+      makeAssistantRow({
+        blocks: [
+          {
+            type: 'tool_call',
+            status: 'pending',
+            timestamp: 1,
+            tool_call: { id: 'tc1', name: 'ask_question', params: '{}', response: '' }
+          },
+          {
+            type: 'action',
+            action_type: 'question_request',
+            status: 'pending',
+            timestamp: 2,
+            content: 'Pick one',
+            tool_call: { id: 'tc1', name: 'ask_question', params: '{}' },
+            extra: {
+              needsUserAction: true,
+              questionText: 'Pick one',
+              questionOptions: [{ label: 'A' }]
+            }
+          }
+        ]
+      })
+      sqlitePresenter.deepchatRunsTable.insert({
+        id: 'run-1',
+        sessionId: 's1',
+        title: 'Recover run',
+        goal: 'Recover run',
+        status: 'recovering',
+        stage: 'handoff',
+        activeCheckpointId: 'checkpoint-1',
+        createdAt: 1,
+        updatedAt: 1
+      })
+      sqlitePresenter.deepchatRunCheckpointsTable.insert({
+        id: 'checkpoint-1',
+        runId: 'run-1',
+        sessionId: 's1',
+        checkpointType: 'before_compaction',
+        label: 'Before compaction',
+        payloadJson: JSON.stringify({
+          handoffMarkdown: '# Structured Handoff\n\n## Current Goal\nRecover run'
+        }),
+        createdAt: 1
+      })
+
+      await agent.respondToolInteraction('s1', 'm1', 'tc1', {
+        kind: 'question_option',
+        optionLabel: 'A'
+      })
+
+      const resumeMessages = (processStream as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0]
+        ?.messages as Array<{ role: string; content: string }>
+      const systemMessage = resumeMessages.find((message) => message.role === 'system')
+
+      expect(systemMessage?.content).toContain('## Recovery Handoff')
+      expect(systemMessage?.content).toContain('# Structured Handoff')
+      expect(systemMessage?.content).toContain('Recover run')
     })
 
     it('treats an aborted resume signal as cancellation even for non-abort errors', async () => {

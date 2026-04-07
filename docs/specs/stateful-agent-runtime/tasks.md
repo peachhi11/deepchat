@@ -69,9 +69,11 @@
 - [x] 新增 `CheckpointStore`
 - [ ] 新增 `CheckpointManager`
 - [x] 在 `before_wait` 场景生成 checkpoint
-- [ ] 在 `before_compaction` / `before_reset` 场景生成 checkpoint
-- [ ] 在 `completed` / `failed` 场景生成 checkpoint
-- [ ] 新增 `handoffBuilder`
+- [x] 在 `before_compaction` 场景生成 checkpoint
+- [ ] 在 `before_reset` 场景生成 checkpoint
+- [ ] 在 `completed` 场景生成 checkpoint
+- [x] 在 `failed` 场景生成 checkpoint
+- [x] 新增 `handoffBuilder`
 - [ ] 在 compaction / reset / recovery 路径中读取 handoff 而不是只读 transcript
 
 ## T5 Memory Fabric
