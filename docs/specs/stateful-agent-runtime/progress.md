@@ -168,14 +168,29 @@
 - 当前已经接上的最小 producer：
   - 成功的只读验证型 `tool_result` 会写 `evidence` memory
   - run `failure` 会写 `episodic` failure memory
-- 当前已经接上的最小 consumer：
-  - `processMessage()` 会把 recent episodic/evidence memory 组装进 `## Working Memory`
-  - `resumeAssistantMessage()` 也会带上同一份 state-aware working set
 - 当前已经接上的最小 handoff consumer：
   - `before_compaction` / `before_reset` / `failure` checkpoint 的 handoff markdown 会带 recent episodic/evidence memory
 - 当前刻意还没做的部分：
   - `semantic` / `procedural` memory gate
-  - 更强的 working set 裁剪 /排序策略
+  - 将 memory / handoff 暴露为按需读取的 runtime resource 或 tool
+  - 更强的 retrieval 裁剪 / 排序策略
+
+## Step 6 方向修正
+
+- 已撤掉 direct prompt injection：
+  - `processMessage()` 不再把 `## Working Memory` 注入 system prompt
+  - `resumeAssistantMessage()` 不再把 `## Recovery Handoff` 注入 system prompt
+- durable 数据层保留不动：
+  - `deepchat_memory_records`
+  - `deepchat_run_checkpoints`
+  - handoff markdown producer
+- 新增最小 planner 闭环：
+  - `goalPlanner.ts` 会先把用户请求重写成结构化 `title / goal / acceptanceCriteria`
+  - planner 输出会写入 durable `decision` step，标题为 `Plan current goal`
+  - planner 失败时会 fallback 到原先的 `buildRunTitle()` / `buildRunGoal()`
+- 当前的 prompt 策略改为：
+  - system prompt 只保留稳定 base prompt + summary
+  - memory / handoff 只保留 durable truth，等待后续改成 resource / tool 按需读取
 
 ## 验证记录
 
@@ -221,6 +236,9 @@
 - `pnpm exec vitest --run test/main/presenter/agentRuntimePresenter/handoffBuilder.test.ts test/main/presenter/agentRuntimePresenter/retrievalPlanner.test.ts test/main/presenter/agentRuntimePresenter/agentRuntimePresenter.test.ts`
   - 结果：`3 passed`
   - 说明：Step 6 第三刀的 handoff memory 注入、working memory retrieval、failure handoff memory 回归都已通过 main 定向测试
+- `pnpm exec vitest --run test/main/presenter/agentRuntimePresenter/goalPlanner.test.ts test/main/presenter/agentRuntimePresenter/agentRuntimePresenter.test.ts`
+  - 结果：`2 passed`
+  - 说明：已验证 direct prompt injection 已撤掉、planner 输出会驱动 run title / goal，并写入 durable decision step
 - `pnpm run format`
   - 结果：通过
 - `pnpm run i18n`

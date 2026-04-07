@@ -684,6 +684,36 @@ describe('AgentRuntimePresenter', () => {
       ])
     })
 
+    it('uses planner output to derive run title and goal', async () => {
+      llmProvider.generateCompletionStandalone.mockResolvedValueOnce(
+        JSON.stringify({
+          title: 'Refactor checkpoint flow',
+          goal: 'Refactor checkpoint flow and verify behavior',
+          acceptanceCriteria: ['Update checkpoint transitions', 'Verify retry behavior']
+        })
+      )
+
+      await agent.initSession('s1', { providerId: 'openai', modelId: 'gpt-4' })
+      await agent.processMessage('s1', 'make checkpoint runtime more reliable')
+
+      await expect(agent.getActiveRunSnapshot('s1')).resolves.toMatchObject({
+        title: 'Refactor checkpoint flow',
+        goal: 'Refactor checkpoint flow and verify behavior'
+      })
+
+      const planningStep = sqlitePresenter.deepchatRunStepsTable.insert.mock.calls
+        .map(([row]: [Record<string, unknown>]) => row)
+        .find((row) => row.kind === 'decision' && row.title === 'Plan current goal')
+
+      expect(planningStep).toBeTruthy()
+      expect(JSON.parse(planningStep?.payloadJson as string)).toMatchObject({
+        plannerSource: 'model',
+        title: 'Refactor checkpoint flow',
+        goal: 'Refactor checkpoint flow and verify behavior',
+        acceptanceCriteria: ['Update checkpoint transitions', 'Verify retry behavior']
+      })
+    })
+
     it('reuses the latest non-terminal run across consecutive turns', async () => {
       await agent.initSession('s1', { providerId: 'openai', modelId: 'gpt-4' })
 
@@ -912,7 +942,7 @@ describe('AgentRuntimePresenter', () => {
       expect(failureHandoff).toContain('[evidence]')
     })
 
-    it('injects recent evidence memory into the next-turn system prompt', async () => {
+    it('keeps recent evidence memory durable without injecting it into the next-turn system prompt', async () => {
       ;(processStream as ReturnType<typeof vi.fn>)
         .mockImplementationOnce(async (params) => {
           params.hooks?.onPreToolUse?.({
@@ -948,12 +978,18 @@ describe('AgentRuntimePresenter', () => {
         ?.messages as Array<{ role: string; content: string }>
       const systemMessage = nextTurnMessages.find((message) => message.role === 'system')
 
-      expect(systemMessage?.content).toContain('## Working Memory')
-      expect(systemMessage?.content).toContain('### Recent Evidence Memory')
-      expect(systemMessage?.content).toContain('read produced evidence: README content')
+      expect(systemMessage?.content).not.toContain('## Working Memory')
+      expect(systemMessage?.content).not.toContain('### Recent Evidence Memory')
+      expect(systemMessage?.content).not.toContain('read produced evidence: README content')
+      expect(sqlitePresenter.deepchatMemoryRecordsTable.insert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          scope: 'evidence',
+          summary: 'read produced evidence: README content'
+        })
+      )
     })
 
-    it('injects recent episodic memory into the next-turn system prompt after a failure', async () => {
+    it('keeps recent episodic memory durable without injecting it into the next-turn system prompt', async () => {
       ;(processStream as ReturnType<typeof vi.fn>)
         .mockResolvedValueOnce({
           status: 'error',
@@ -974,10 +1010,16 @@ describe('AgentRuntimePresenter', () => {
         ?.messages as Array<{ role: string; content: string }>
       const systemMessage = nextTurnMessages.find((message) => message.role === 'system')
 
-      expect(systemMessage?.content).toContain('## Working Memory')
-      expect(systemMessage?.content).toContain('### Recent Episodic Memory')
-      expect(systemMessage?.content).toContain(
+      expect(systemMessage?.content).not.toContain('## Working Memory')
+      expect(systemMessage?.content).not.toContain('### Recent Episodic Memory')
+      expect(systemMessage?.content).not.toContain(
         'Run failure (max_tool_calls): Max tool call limit reached'
+      )
+      expect(sqlitePresenter.deepchatMemoryRecordsTable.insert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          scope: 'episodic',
+          summary: 'Run failure (max_tool_calls): Max tool call limit reached (129 > 128)'
+        })
       )
     })
 
@@ -1373,6 +1415,7 @@ describe('AgentRuntimePresenter', () => {
     it('passes every provider turn through executeWithRateLimit', async () => {
       await agent.initSession('s1', { providerId: 'openai', modelId: 'gpt-4' })
       await agent.processMessage('s1', 'Hello')
+      llmProvider.executeWithRateLimit.mockClear()
 
       const callArgs = (processStream as ReturnType<typeof vi.fn>).mock.calls[0][0]
       for await (const _event of callArgs.coreStream(
@@ -1565,8 +1608,7 @@ describe('AgentRuntimePresenter', () => {
       await agent.cancelGeneration('s1')
       await processing
 
-      const providerCoreStream = llmProvider.getProviderInstance.mock.results[0]?.value.coreStream
-      expect(providerCoreStream).not.toHaveBeenCalled()
+      expect(llmProvider.getProviderInstance).not.toHaveBeenCalled()
       expect((await agent.getSessionState('s1'))?.status).toBe('idle')
     })
 
@@ -1634,24 +1676,7 @@ describe('AgentRuntimePresenter', () => {
       await agent.initSession('s1', { providerId: 'openai', modelId: 'gpt-4' })
       await agent.processMessage('s1', 'Hello')
 
-      const providerCoreStream = llmProvider.getProviderInstance.mock.results[0]?.value.coreStream
-      expect(providerCoreStream).not.toHaveBeenCalled()
-
-      const streamResponseCalls = (eventBus.sendToRenderer as ReturnType<typeof vi.fn>).mock.calls
-        .filter(([eventName]) => eventName === 'stream:response')
-        .map(([, , payload]) => payload)
-        .filter((payload) => typeof payload?.messageId === 'string')
-      const rateLimitClear = streamResponseCalls.find(
-        (payload) =>
-          payload.messageId.startsWith('__rate_limit__:') &&
-          Array.isArray(payload.blocks) &&
-          payload.blocks.length === 0
-      )
-
-      expect(rateLimitClear).toMatchObject({
-        conversationId: 's1',
-        blocks: []
-      })
+      expect(llmProvider.getProviderInstance).not.toHaveBeenCalled()
       expect((await agent.getSessionState('s1'))?.status).toBe('idle')
     })
 
@@ -2964,9 +2989,9 @@ describe('AgentRuntimePresenter', () => {
         ?.messages as Array<{ role: string; content: string }>
       const systemMessage = streamMessages.find((message) => message.role === 'system')
 
-      expect(systemMessage?.content).toContain('## Recovery Handoff')
-      expect(systemMessage?.content).toContain('# Structured Handoff')
-      expect(systemMessage?.content).toContain(
+      expect(systemMessage?.content).not.toContain('## Recovery Handoff')
+      expect(systemMessage?.content).not.toContain('# Structured Handoff')
+      expect(compactionCheckpoint.payloadJson).toContain(
         'Continue the current run after summary compaction completes.'
       )
 
@@ -3222,7 +3247,7 @@ describe('AgentRuntimePresenter', () => {
       expect(processStream).toHaveBeenCalledTimes(1)
     })
 
-    it('injects checkpoint handoff markdown into the resume system prompt when available', async () => {
+    it('keeps checkpoint handoff durable without injecting it into the resume system prompt', async () => {
       await agent.initSession('s1', { providerId: 'openai', modelId: 'gpt-4' })
       makeAssistantRow({
         blocks: [
@@ -3279,12 +3304,11 @@ describe('AgentRuntimePresenter', () => {
         ?.messages as Array<{ role: string; content: string }>
       const systemMessage = resumeMessages.find((message) => message.role === 'system')
 
-      expect(systemMessage?.content).toContain('## Recovery Handoff')
-      expect(systemMessage?.content).toContain('# Structured Handoff')
-      expect(systemMessage?.content).toContain('Recover run')
+      expect(systemMessage?.content).not.toContain('## Recovery Handoff')
+      expect(systemMessage?.content).not.toContain('# Structured Handoff')
     })
 
-    it('writes before_reset checkpoint and injects handoff markdown on retry', async () => {
+    it('writes before_reset checkpoint without injecting handoff markdown on retry', async () => {
       await agent.initSession('s1', { providerId: 'openai', modelId: 'gpt-4' })
       sqlitePresenter.deepchatRunsTable.insert({
         id: 'run-1',
@@ -3378,9 +3402,11 @@ describe('AgentRuntimePresenter', () => {
         ?.messages as Array<{ role: string; content: string }>
       const retrySystemMessage = retryStreamMessages.find((message) => message.role === 'system')
 
-      expect(retrySystemMessage?.content).toContain('## Recovery Handoff')
-      expect(retrySystemMessage?.content).toContain('# Structured Handoff')
-      expect(retrySystemMessage?.content).toContain(
+      expect(retrySystemMessage?.content).not.toContain('## Recovery Handoff')
+      expect(retrySystemMessage?.content).not.toContain('# Structured Handoff')
+      expect(
+        sqlitePresenter.deepchatRunCheckpointsTable.insert.mock.calls.at(-1)?.[0]?.payloadJson
+      ).toContain(
         'Restart the current run from the selected message context with a fresh execution pass.'
       )
     })

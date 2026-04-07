@@ -59,6 +59,7 @@
 ## T3 执行循环接线
 
 - [x] `agentRuntimePresenter.processMessage()` 开始前接入 `RunStateManager`
+- [x] 新增最小 `goalPlanner`，在 run 开始前生成 `title / goal / acceptanceCriteria`
 - [ ] `process.ts` 每轮 step 生成 `stepId`
 - [x] permission wait / decision 写入 `StepRecord`
 - [x] `dispatch.ts` 的 tool_call / tool_result 写入 `StepRecord`
@@ -86,7 +87,8 @@
 - [ ] 实现 `working` / `episodic` / `evidence` 首轮写入策略
 - [ ] 实现 `confidence` / `freshness` / `supersedes` 字段约束
 - [ ] 为 `semantic` / `procedural` 建立严格写入门槛
-- [ ] working set 改为 state-aware retrieval 构建（进行中：episodic/evidence 已接入 prompt）
+- [ ] 将 memory / handoff 以 runtime resource / tool 形式按需暴露
+- [ ] working set 改为 state-aware retrieval 构建（已撤回 direct prompt injection，下一步改为按需读取）
 
 ## T6 Observability baseline
 

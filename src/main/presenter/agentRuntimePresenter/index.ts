@@ -53,6 +53,11 @@ import {
   fitMessagesToContextWindow
 } from './contextBuilder'
 import { appendSummarySection, CompactionService, type CompactionIntent } from './compactionService'
+import {
+  buildGoalPlannerMessages,
+  parsePlannedRunIntent,
+  type PlannedRunIntent
+} from './goalPlanner'
 import { buildRunHandoffMarkdown } from './handoffBuilder'
 import { DeepChatMemoryManager } from './memoryManager'
 import { DeepChatMemoryStore } from './memoryStore'
@@ -61,7 +66,6 @@ import { buildTerminalErrorBlocks, DeepChatMessageStore } from './messageStore'
 import { PendingInputCoordinator } from './pendingInputCoordinator'
 import { DeepChatPendingInputStore } from './pendingInputStore'
 import { processStream } from './process'
-import { DeepChatRetrievalPlanner } from './retrievalPlanner'
 import { DeepChatRunCheckpointStore } from './runCheckpointStore'
 import { DeepChatRunStepStore } from './runStepStore'
 import { RunSnapshotBuilder } from './runSnapshotBuilder'
@@ -169,7 +173,6 @@ export class AgentRuntimePresenter implements IAgentImplementation {
   private readonly memoryManager: DeepChatMemoryManager
   private readonly runStateManager: RunStateManager
   private readonly runSnapshotBuilder: RunSnapshotBuilder
-  private readonly retrievalPlanner: DeepChatRetrievalPlanner
   private readonly runtimeState: Map<string, DeepChatSessionState> = new Map()
   private readonly sessionGenerationSettings: Map<string, SessionGenerationSettings> = new Map()
   private readonly abortControllers: Map<string, AbortController> = new Map()
@@ -226,10 +229,6 @@ export class AgentRuntimePresenter implements IAgentImplementation {
       runStepStore: this.runStepStore,
       runCheckpointStore: this.runCheckpointStore
     })
-    this.retrievalPlanner = new DeepChatRetrievalPlanner(
-      this.memoryManager,
-      this.runSnapshotBuilder
-    )
     this.compactionService = new CompactionService(
       this.sessionStore,
       this.messageStore,
@@ -459,27 +458,37 @@ export class AgentRuntimePresenter implements IAgentImplementation {
     const normalizedInput = this.normalizeUserMessageInput(content)
     const supportsVision = this.supportsVision(state.providerId, state.modelId)
     const projectDir = this.resolveProjectDir(sessionId, context?.projectDir)
-    let activeRun: HarnessRun | null = this.runStateManager.ensureActiveRun({
-      sessionId,
-      title: this.buildRunTitle(normalizedInput.text),
-      goal: this.buildRunGoal(normalizedInput.text)
-    })
-    console.log(
-      `[DeepChatAgent] processMessage session=${sessionId} content="${normalizedInput.text.slice(0, 60)}" projectDir=${projectDir ?? '<none>'}`
-    )
-
-    this.emitRunSnapshotUpdate(sessionId, activeRun)
-    this.setSessionStatus(sessionId, 'generating')
     const preStreamAbortController = this.ensureSessionAbortController(sessionId)
     const preStreamAbortSignal = preStreamAbortController.signal
+    let activeRun: HarnessRun | null = null
     let consumedPendingQueueItem = false
     let userMessageId: string | null = null
     let assistantMessageId: string | null = null
-    let compactionCheckpointId: string | null = null
-    const turnStartCheckpointId = this.resolveTurnStartCheckpointId(activeRun?.activeCheckpointId)
+    this.setSessionStatus(sessionId, 'generating')
 
     try {
       this.throwIfAbortRequested(preStreamAbortSignal)
+      const plannedRunIntent = await this.resolvePlannedRunIntent(
+        sessionId,
+        normalizedInput.text,
+        projectDir,
+        preStreamAbortSignal
+      )
+      activeRun = this.runStateManager.ensureActiveRun({
+        sessionId,
+        title: plannedRunIntent.title,
+        goal: plannedRunIntent.goal
+      })
+      this.recordGoalPlanningDecision(activeRun.id, {
+        sessionId,
+        userText: normalizedInput.text,
+        plan: plannedRunIntent
+      })
+      console.log(
+        `[DeepChatAgent] processMessage session=${sessionId} content="${normalizedInput.text.slice(0, 60)}" projectDir=${projectDir ?? '<none>'}`
+      )
+
+      this.emitRunSnapshotUpdate(sessionId, activeRun)
       const generationSettings = await this.getEffectiveSessionGenerationSettings(sessionId)
       this.throwIfAbortRequested(preStreamAbortSignal)
       const interleavedReasoning = this.resolveInterleavedReasoningConfig(
@@ -544,10 +553,6 @@ export class AgentRuntimePresenter implements IAgentImplementation {
           runId: activeRun?.id,
           signal: preStreamAbortSignal
         })
-        if (activeRun?.id) {
-          activeRun = this.runStore.get(activeRun.id)
-          compactionCheckpointId = activeRun?.activeCheckpointId ?? null
-        }
       } else {
         summaryState = this.sessionStore.getSummaryState(sessionId)
         userMessageId = this.messageStore.createUserMessage(
@@ -575,13 +580,7 @@ export class AgentRuntimePresenter implements IAgentImplementation {
         projectDir
       })
 
-      const systemPrompt = this.buildStateAwareSystemPrompt({
-        sessionId,
-        baseSystemPrompt,
-        summaryText: summaryState.summaryText,
-        checkpointIds: [turnStartCheckpointId, compactionCheckpointId],
-        run: activeRun
-      })
+      const systemPrompt = appendSummarySection(baseSystemPrompt, summaryState.summaryText)
       const messages = buildContext(
         sessionId,
         normalizedInput,
@@ -2203,16 +2202,7 @@ export class AgentRuntimePresenter implements IAgentImplementation {
         signal: preStreamAbortSignal
       })
       this.throwIfAbortRequested(preStreamAbortSignal)
-      if (activeRun?.id) {
-        activeRun = this.runStore.get(activeRun.id)
-      }
-      const systemPrompt = this.buildStateAwareSystemPrompt({
-        sessionId,
-        baseSystemPrompt,
-        summaryText: summaryState.summaryText,
-        checkpointIds: [activeRun?.activeCheckpointId],
-        run: activeRun
-      })
+      const systemPrompt = appendSummarySection(baseSystemPrompt, summaryState.summaryText)
       let resumeContext = buildResumeContext(
         sessionId,
         messageId,
@@ -4089,87 +4079,102 @@ export class AgentRuntimePresenter implements IAgentImplementation {
     })
   }
 
-  private getCheckpointHandoffMarkdown(checkpointId?: string | null): string | null {
-    if (!checkpointId) {
-      return null
+  private async resolvePlannedRunIntent(
+    sessionId: string,
+    userText: string,
+    projectDir?: string | null,
+    signal?: AbortSignal
+  ): Promise<PlannedRunIntent> {
+    const fallback = {
+      title: this.buildRunTitle(userText),
+      goal: this.buildRunGoal(userText)
+    }
+    const normalizedText = userText.trim()
+    if (!normalizedText) {
+      return {
+        ...fallback,
+        acceptanceCriteria: [],
+        source: 'fallback'
+      }
     }
 
-    const checkpoint = this.runCheckpointStore.get(checkpointId)
-    if (!checkpoint?.payloadJson) {
-      return null
+    const state = this.runtimeState.get(sessionId)
+    if (!state) {
+      return {
+        ...fallback,
+        acceptanceCriteria: [],
+        source: 'fallback'
+      }
     }
+
+    const latestRun = this.runStateManager.getLatestRun(sessionId)
+    const activeRunContext =
+      latestRun && !['completed', 'failed', 'aborted'].includes(latestRun.status) ? latestRun : null
 
     try {
-      const parsed = JSON.parse(checkpoint.payloadJson) as { handoffMarkdown?: unknown }
-      return typeof parsed.handoffMarkdown === 'string' && parsed.handoffMarkdown.trim()
-        ? parsed.handoffMarkdown.trim()
-        : null
-    } catch {
-      return null
+      await this.llmProviderPresenter.executeWithRateLimit(state.providerId, { signal })
+      this.throwIfAbortRequested(signal)
+      const response = await this.llmProviderPresenter.generateCompletionStandalone(
+        state.providerId,
+        buildGoalPlannerMessages({
+          text: normalizedText,
+          projectDir,
+          currentTitle: activeRunContext?.title,
+          currentGoal: activeRunContext?.goal
+        }),
+        state.modelId,
+        0.1,
+        240,
+        { signal }
+      )
+      this.throwIfAbortRequested(signal)
+      return parsePlannedRunIntent(response, fallback)
+    } catch (error) {
+      if (this.isAbortError(error) || signal?.aborted) {
+        throw error
+      }
+
+      console.warn('[DeepChatAgent] Goal planner fallback:', error)
+      return {
+        ...fallback,
+        acceptanceCriteria: [],
+        source: 'fallback'
+      }
     }
   }
 
-  private resolveTurnStartCheckpointId(checkpointId?: string | null): string | null {
-    if (!checkpointId) {
-      return null
+  private recordGoalPlanningDecision(
+    runId: string,
+    params: {
+      sessionId: string
+      userText: string
+      plan: PlannedRunIntent
     }
+  ): void {
+    const now = Date.now()
 
-    const checkpoint = this.runCheckpointStore.get(checkpointId)
-    if (!checkpoint) {
-      return null
-    }
-
-    return checkpoint.checkpointType === 'before_reset' ? checkpoint.id : null
-  }
-
-  private buildCheckpointHandoffSection(checkpointId?: string | null): string | null {
-    const handoffMarkdown = this.getCheckpointHandoffMarkdown(checkpointId)
-    if (!handoffMarkdown) {
-      return null
-    }
-
-    return [
-      '## Recovery Handoff',
-      'The structured checkpoint handoff below is durable runtime state. Use it to recover context before relying on transcript replay.',
-      '```md',
-      handoffMarkdown,
-      '```'
-    ].join('\n')
-  }
-
-  private appendCheckpointHandoffSections(
-    systemPrompt: string,
-    checkpointIds: Array<string | null | undefined>
-  ): string {
-    const handoffSections = Array.from(new Set(checkpointIds.filter(Boolean))).map((checkpointId) =>
-      this.buildCheckpointHandoffSection(checkpointId)
-    )
-
-    return [systemPrompt, ...handoffSections].filter(Boolean).join('\n\n')
-  }
-
-  private appendWorkingSetSection(
-    systemPrompt: string,
-    sessionId: string,
-    run: HarnessRun | null
-  ): string {
-    const section = this.retrievalPlanner.buildPromptSection(
-      this.retrievalPlanner.buildWorkingSet(sessionId, run)
-    )
-
-    return [systemPrompt, section].filter(Boolean).join('\n\n')
-  }
-
-  private buildStateAwareSystemPrompt(params: {
-    sessionId: string
-    baseSystemPrompt: string
-    summaryText: string | null
-    checkpointIds: Array<string | null | undefined>
-    run: HarnessRun | null
-  }): string {
-    const withSummary = appendSummarySection(params.baseSystemPrompt, params.summaryText)
-    const withHandoff = this.appendCheckpointHandoffSections(withSummary, params.checkpointIds)
-    return this.appendWorkingSetSection(withHandoff, params.sessionId, params.run)
+    this.runStepStore.create({
+      id: nanoid(),
+      runId,
+      sessionId: params.sessionId,
+      messageId: null,
+      toolCallId: null,
+      kind: 'decision',
+      title: 'Plan current goal',
+      status: 'completed',
+      payloadJson: this.buildStepPayload({
+        effectClass: 'other',
+        evidence: false,
+        plannerSource: params.plan.source,
+        userText: this.truncateStepText(params.userText, 400),
+        title: params.plan.title,
+        goal: params.plan.goal,
+        acceptanceCriteria: params.plan.acceptanceCriteria
+      }),
+      createdAt: now,
+      updatedAt: now,
+      completedAt: now
+    })
   }
 
   private recordPermissionWait(
