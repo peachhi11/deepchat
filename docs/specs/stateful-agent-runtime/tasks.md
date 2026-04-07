@@ -82,11 +82,11 @@
 - [x] 新增 `deepchat_memory_records` table
 - [x] 新增 `MemoryStore`
 - [x] 新增 `MemoryManager`
-- [ ] 新增 `retrievalPlanner`
+- [x] 新增 `retrievalPlanner`
 - [ ] 实现 `working` / `episodic` / `evidence` 首轮写入策略
 - [ ] 实现 `confidence` / `freshness` / `supersedes` 字段约束
 - [ ] 为 `semantic` / `procedural` 建立严格写入门槛
-- [ ] working set 改为 state-aware retrieval 构建
+- [ ] working set 改为 state-aware retrieval 构建（进行中：episodic/evidence 已接入 prompt）
 
 ## T6 Observability baseline
 

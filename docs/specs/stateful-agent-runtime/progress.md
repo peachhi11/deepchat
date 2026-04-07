@@ -163,13 +163,18 @@
 - 新增 main store / manager：
   - `src/main/presenter/agentRuntimePresenter/memoryStore.ts`
   - `src/main/presenter/agentRuntimePresenter/memoryManager.ts`
+- 新增 retrieval planner：
+  - `src/main/presenter/agentRuntimePresenter/retrievalPlanner.ts`
 - 当前已经接上的最小 producer：
   - 成功的只读验证型 `tool_result` 会写 `evidence` memory
   - run `failure` 会写 `episodic` failure memory
+- 当前已经接上的最小 consumer：
+  - `processMessage()` 会把 recent episodic/evidence memory 组装进 `## Working Memory`
+  - `resumeAssistantMessage()` 也会带上同一份 state-aware working set
 - 当前刻意还没做的部分：
-  - `working` retrieval / prompt 组装
   - `semantic` / `procedural` memory gate
   - handoff builder 读取 recent memory
+  - 更强的 working set 裁剪 /排序策略
 
 ## 验证记录
 
@@ -209,6 +214,9 @@
 - `pnpm exec vitest --run test/main/presenter/agentRuntimePresenter/memoryStore.test.ts test/main/presenter/agentRuntimePresenter/agentRuntimePresenter.test.ts test/main/presenter/sqlitePresenter.test.ts`
   - 结果：`2 passed | 1 skipped`
   - 说明：Step 6 第一刀的 memory store、evidence/episodic producer 已通过 main 定向测试；`sqlitePresenter.test.ts` 仍因当前环境 sqlite native 依赖不可用被整组跳过
+- `pnpm exec vitest --run test/main/presenter/agentRuntimePresenter/retrievalPlanner.test.ts test/main/presenter/agentRuntimePresenter/agentRuntimePresenter.test.ts`
+  - 结果：`2 passed`
+  - 说明：Step 6 第二刀的 retrieval planner、next-turn working memory prompt 注入已通过 main 定向测试
 - `pnpm run format`
   - 结果：通过
 - `pnpm run i18n`
@@ -223,6 +231,6 @@
 
 继续 Step 6
 
-- 补 `retrievalPlanner`
-- 先做最小 `working` set 组装
-- 再决定先把 memory 接进 handoff builder 还是直接接进 prompt builder
+- 细化 working set 的裁剪 / 排序 / scope policy
+- 决定先把 recent memory 接进 handoff builder，还是先补更多 producer
+- 之后再考虑 semantic / procedural 的严格 gate

@@ -61,6 +61,7 @@ import { buildTerminalErrorBlocks, DeepChatMessageStore } from './messageStore'
 import { PendingInputCoordinator } from './pendingInputCoordinator'
 import { DeepChatPendingInputStore } from './pendingInputStore'
 import { processStream } from './process'
+import { DeepChatRetrievalPlanner } from './retrievalPlanner'
 import { DeepChatRunCheckpointStore } from './runCheckpointStore'
 import { DeepChatRunStepStore } from './runStepStore'
 import { RunSnapshotBuilder } from './runSnapshotBuilder'
@@ -168,6 +169,7 @@ export class AgentRuntimePresenter implements IAgentImplementation {
   private readonly memoryManager: DeepChatMemoryManager
   private readonly runStateManager: RunStateManager
   private readonly runSnapshotBuilder: RunSnapshotBuilder
+  private readonly retrievalPlanner: DeepChatRetrievalPlanner
   private readonly runtimeState: Map<string, DeepChatSessionState> = new Map()
   private readonly sessionGenerationSettings: Map<string, SessionGenerationSettings> = new Map()
   private readonly abortControllers: Map<string, AbortController> = new Map()
@@ -224,6 +226,10 @@ export class AgentRuntimePresenter implements IAgentImplementation {
       runStepStore: this.runStepStore,
       runCheckpointStore: this.runCheckpointStore
     })
+    this.retrievalPlanner = new DeepChatRetrievalPlanner(
+      this.memoryManager,
+      this.runSnapshotBuilder
+    )
     this.compactionService = new CompactionService(
       this.sessionStore,
       this.messageStore,
@@ -569,10 +575,13 @@ export class AgentRuntimePresenter implements IAgentImplementation {
         projectDir
       })
 
-      const systemPrompt = this.appendCheckpointHandoffSections(
-        appendSummarySection(baseSystemPrompt, summaryState.summaryText),
-        [turnStartCheckpointId, compactionCheckpointId]
-      )
+      const systemPrompt = this.buildStateAwareSystemPrompt({
+        sessionId,
+        baseSystemPrompt,
+        summaryText: summaryState.summaryText,
+        checkpointIds: [turnStartCheckpointId, compactionCheckpointId],
+        run: activeRun
+      })
       const messages = buildContext(
         sessionId,
         normalizedInput,
@@ -2194,10 +2203,16 @@ export class AgentRuntimePresenter implements IAgentImplementation {
         signal: preStreamAbortSignal
       })
       this.throwIfAbortRequested(preStreamAbortSignal)
-      const systemPrompt = this.appendCheckpointHandoffSections(
-        appendSummarySection(baseSystemPrompt, summaryState.summaryText),
-        [activeRun?.activeCheckpointId]
-      )
+      if (activeRun?.id) {
+        activeRun = this.runStore.get(activeRun.id)
+      }
+      const systemPrompt = this.buildStateAwareSystemPrompt({
+        sessionId,
+        baseSystemPrompt,
+        summaryText: summaryState.summaryText,
+        checkpointIds: [activeRun?.activeCheckpointId],
+        run: activeRun
+      })
       let resumeContext = buildResumeContext(
         sessionId,
         messageId,
@@ -4131,6 +4146,30 @@ export class AgentRuntimePresenter implements IAgentImplementation {
     )
 
     return [systemPrompt, ...handoffSections].filter(Boolean).join('\n\n')
+  }
+
+  private appendWorkingSetSection(
+    systemPrompt: string,
+    sessionId: string,
+    run: HarnessRun | null
+  ): string {
+    const section = this.retrievalPlanner.buildPromptSection(
+      this.retrievalPlanner.buildWorkingSet(sessionId, run)
+    )
+
+    return [systemPrompt, section].filter(Boolean).join('\n\n')
+  }
+
+  private buildStateAwareSystemPrompt(params: {
+    sessionId: string
+    baseSystemPrompt: string
+    summaryText: string | null
+    checkpointIds: Array<string | null | undefined>
+    run: HarnessRun | null
+  }): string {
+    const withSummary = appendSummarySection(params.baseSystemPrompt, params.summaryText)
+    const withHandoff = this.appendCheckpointHandoffSections(withSummary, params.checkpointIds)
+    return this.appendWorkingSetSection(withHandoff, params.sessionId, params.run)
   }
 
   private recordPermissionWait(

@@ -868,6 +868,75 @@ describe('AgentRuntimePresenter', () => {
       )
     })
 
+    it('injects recent evidence memory into the next-turn system prompt', async () => {
+      ;(processStream as ReturnType<typeof vi.fn>)
+        .mockImplementationOnce(async (params) => {
+          params.hooks?.onPreToolUse?.({
+            callId: 'tool-1',
+            name: 'read',
+            params: '{"path":"README.md"}',
+            effectClass: 'read'
+          })
+          params.hooks?.onPostToolUse?.({
+            callId: 'tool-1',
+            name: 'read',
+            params: '{"path":"README.md"}',
+            response: 'README content',
+            effectClass: 'read',
+            evidence: true
+          })
+
+          return {
+            status: 'completed',
+            stopReason: 'complete'
+          }
+        })
+        .mockResolvedValueOnce({
+          status: 'completed',
+          stopReason: 'complete'
+        })
+
+      await agent.initSession('s1', { providerId: 'openai', modelId: 'gpt-4' })
+      await agent.processMessage('s1', 'Inspect the repository readme')
+      await agent.processMessage('s1', 'Continue the current task')
+
+      const nextTurnMessages = (processStream as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0]
+        ?.messages as Array<{ role: string; content: string }>
+      const systemMessage = nextTurnMessages.find((message) => message.role === 'system')
+
+      expect(systemMessage?.content).toContain('## Working Memory')
+      expect(systemMessage?.content).toContain('### Recent Evidence Memory')
+      expect(systemMessage?.content).toContain('read produced evidence: README content')
+    })
+
+    it('injects recent episodic memory into the next-turn system prompt after a failure', async () => {
+      ;(processStream as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce({
+          status: 'error',
+          stopReason: 'max_tool_calls',
+          errorMessage: 'Max tool call limit reached (129 > 128)',
+          terminalError: 'Max tool call limit reached (129 > 128)'
+        })
+        .mockResolvedValueOnce({
+          status: 'completed',
+          stopReason: 'complete'
+        })
+
+      await agent.initSession('s1', { providerId: 'openai', modelId: 'gpt-4' })
+      await agent.processMessage('s1', 'Loop until failure')
+      await agent.processMessage('s1', 'Recover from the failure')
+
+      const nextTurnMessages = (processStream as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0]
+        ?.messages as Array<{ role: string; content: string }>
+      const systemMessage = nextTurnMessages.find((message) => message.role === 'system')
+
+      expect(systemMessage?.content).toContain('## Working Memory')
+      expect(systemMessage?.content).toContain('### Recent Episodic Memory')
+      expect(systemMessage?.content).toContain(
+        'Run failure (max_tool_calls): Max tool call limit reached'
+      )
+    })
+
     it('calls processStream with correct params', async () => {
       await agent.initSession('s1', { providerId: 'openai', modelId: 'gpt-4' })
       await agent.processMessage('s1', 'Hello')
