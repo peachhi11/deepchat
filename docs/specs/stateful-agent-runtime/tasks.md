@@ -8,7 +8,7 @@
 - [x] Step 2: Active Run Lifecycle
 - [x] Step 3: Permission Wait Backbone
 - [x] Step 4: Structured Step Log
-- [ ] Step 5: Checkpoint + Handoff on Compaction
+- [x] Step 5: Checkpoint + Handoff on Compaction
 - [ ] Step 6: Memory Baseline
 - [ ] Step 7: Single-Root Task + Completion Gate
 - [ ] Step 8: Run Ticker
@@ -70,11 +70,11 @@
 - [ ] 新增 `CheckpointManager`
 - [x] 在 `before_wait` 场景生成 checkpoint
 - [x] 在 `before_compaction` 场景生成 checkpoint
-- [ ] 在 `before_reset` 场景生成 checkpoint
-- [ ] 在 `completed` 场景生成 checkpoint
+- [x] 在 `before_reset` 场景生成 checkpoint
+- [ ] 在 `completed` 场景生成 checkpoint（延后到 Step 7 completion gate）
 - [x] 在 `failed` 场景生成 checkpoint
 - [x] 新增 `handoffBuilder`
-- [ ] 在 compaction / reset / recovery 路径中读取 handoff 而不是只读 transcript
+- [x] 在 compaction / reset / recovery 路径中读取 handoff 而不是只读 transcript
 
 ## T5 Memory Fabric
 

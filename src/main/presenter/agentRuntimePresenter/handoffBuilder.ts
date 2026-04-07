@@ -5,7 +5,7 @@ type BuildRunHandoffInput = {
   run: HarnessRun
   summaryState: SessionSummaryState
   checkpointLabel: string
-  source: 'before_compaction' | 'failure'
+  source: 'before_compaction' | 'before_reset' | 'failure'
   nextStep: string
   errorMessage?: string
 }

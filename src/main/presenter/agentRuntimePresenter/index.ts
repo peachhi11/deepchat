@@ -462,6 +462,8 @@ export class AgentRuntimePresenter implements IAgentImplementation {
     let consumedPendingQueueItem = false
     let userMessageId: string | null = null
     let assistantMessageId: string | null = null
+    let compactionCheckpointId: string | null = null
+    const turnStartCheckpointId = this.resolveTurnStartCheckpointId(activeRun?.activeCheckpointId)
 
     try {
       this.throwIfAbortRequested(preStreamAbortSignal)
@@ -529,6 +531,10 @@ export class AgentRuntimePresenter implements IAgentImplementation {
           runId: activeRun?.id,
           signal: preStreamAbortSignal
         })
+        if (activeRun?.id) {
+          activeRun = this.runStore.get(activeRun.id)
+          compactionCheckpointId = activeRun?.activeCheckpointId ?? null
+        }
       } else {
         summaryState = this.sessionStore.getSummaryState(sessionId)
         userMessageId = this.messageStore.createUserMessage(
@@ -556,7 +562,10 @@ export class AgentRuntimePresenter implements IAgentImplementation {
         projectDir
       })
 
-      const systemPrompt = appendSummarySection(baseSystemPrompt, summaryState.summaryText)
+      const systemPrompt = this.appendCheckpointHandoffSections(
+        appendSummarySection(baseSystemPrompt, summaryState.summaryText),
+        [turnStartCheckpointId, compactionCheckpointId]
+      )
       const messages = buildContext(
         sessionId,
         normalizedInput,
@@ -1452,6 +1461,15 @@ export class AgentRuntimePresenter implements IAgentImplementation {
       throw new Error('Cannot retry an empty user message.')
     }
 
+    const latestRun = this.runStateManager.getLatestRun(sessionId)
+    if (latestRun) {
+      this.recordResetCheckpoint(sessionId, latestRun.id, {
+        sourceMessageId: sourceUserMessage.id,
+        sourceOrderSeq: sourceUserMessage.orderSeq,
+        reason: 'retry'
+      })
+    }
+
     this.invalidateSummaryIfNeeded(sessionId, sourceUserMessage.orderSeq)
     this.messageStore.deleteFromOrderSeq(sessionId, sourceUserMessage.orderSeq)
     await this.processMessage(sessionId, retryInput, {
@@ -2169,9 +2187,9 @@ export class AgentRuntimePresenter implements IAgentImplementation {
         signal: preStreamAbortSignal
       })
       this.throwIfAbortRequested(preStreamAbortSignal)
-      const systemPrompt = this.appendCheckpointHandoffSection(
+      const systemPrompt = this.appendCheckpointHandoffSections(
         appendSummarySection(baseSystemPrompt, summaryState.summaryText),
-        activeRun?.activeCheckpointId
+        [activeRun?.activeCheckpointId]
       )
       let resumeContext = buildResumeContext(
         sessionId,
@@ -4069,24 +4087,43 @@ export class AgentRuntimePresenter implements IAgentImplementation {
     }
   }
 
-  private appendCheckpointHandoffSection(
-    systemPrompt: string,
-    checkpointId?: string | null
-  ): string {
-    const handoffMarkdown = this.getCheckpointHandoffMarkdown(checkpointId)
-    if (!handoffMarkdown) {
-      return systemPrompt
+  private resolveTurnStartCheckpointId(checkpointId?: string | null): string | null {
+    if (!checkpointId) {
+      return null
     }
 
-    const handoffSection = [
+    const checkpoint = this.runCheckpointStore.get(checkpointId)
+    if (!checkpoint) {
+      return null
+    }
+
+    return checkpoint.checkpointType === 'before_reset' ? checkpoint.id : null
+  }
+
+  private buildCheckpointHandoffSection(checkpointId?: string | null): string | null {
+    const handoffMarkdown = this.getCheckpointHandoffMarkdown(checkpointId)
+    if (!handoffMarkdown) {
+      return null
+    }
+
+    return [
       '## Recovery Handoff',
       'The structured checkpoint handoff below is durable runtime state. Use it to recover context before relying on transcript replay.',
       '```md',
       handoffMarkdown,
       '```'
     ].join('\n')
+  }
 
-    return [systemPrompt, handoffSection].filter(Boolean).join('\n\n')
+  private appendCheckpointHandoffSections(
+    systemPrompt: string,
+    checkpointIds: Array<string | null | undefined>
+  ): string {
+    const handoffSections = Array.from(new Set(checkpointIds.filter(Boolean))).map((checkpointId) =>
+      this.buildCheckpointHandoffSection(checkpointId)
+    )
+
+    return [systemPrompt, ...handoffSections].filter(Boolean).join('\n\n')
   }
 
   private recordPermissionWait(
@@ -4285,6 +4322,50 @@ export class AgentRuntimePresenter implements IAgentImplementation {
           checkpointLabel: 'Before compaction',
           source: 'before_compaction',
           nextStep: 'Continue the current run after summary compaction completes.'
+        })
+      }),
+      createdAt: Date.now()
+    })
+
+    this.attachCheckpointToRun(sessionId, runId, checkpoint.id, 'handoff')
+  }
+
+  private recordResetCheckpoint(
+    sessionId: string,
+    runId: string,
+    params: {
+      sourceMessageId: string
+      sourceOrderSeq: number
+      reason: 'retry'
+    }
+  ): void {
+    const run = this.runStore.get(runId)
+    if (!run) {
+      return
+    }
+
+    const summaryState = this.sessionStore.getSummaryState(sessionId)
+    const checkpoint = this.createRunCheckpoint({
+      id: this.buildDeterministicRunCheckpointId(
+        runId,
+        'before_reset',
+        `${params.reason}:${params.sourceOrderSeq}`
+      ),
+      runId,
+      sessionId,
+      checkpointType: 'before_reset',
+      label: 'Before reset',
+      payloadJson: this.buildCheckpointPayload({
+        sourceMessageId: params.sourceMessageId,
+        sourceOrderSeq: params.sourceOrderSeq,
+        reason: params.reason,
+        handoffMarkdown: buildRunHandoffMarkdown({
+          run,
+          summaryState,
+          checkpointLabel: 'Before reset',
+          source: 'before_reset',
+          nextStep:
+            'Restart the current run from the selected message context with a fresh execution pass.'
         })
       }),
       createdAt: Date.now()

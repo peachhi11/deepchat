@@ -138,6 +138,7 @@ function createMockSqlitePresenter() {
       updateStatus: vi.fn(),
       updateContentAndStatus: vi.fn(),
       getBySession: vi.fn().mockReturnValue([]),
+      getLastUserMessageBeforeOrAtOrderSeq: vi.fn(),
       getByStatus: vi.fn().mockReturnValue([]),
       getIdsBySession: vi.fn().mockReturnValue([]),
       getIdsFromOrderSeq: vi.fn().mockReturnValue([]),
@@ -2792,6 +2793,16 @@ describe('AgentRuntimePresenter', () => {
         '# Structured Handoff'
       )
 
+      const streamMessages = (processStream as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0]
+        ?.messages as Array<{ role: string; content: string }>
+      const systemMessage = streamMessages.find((message) => message.role === 'system')
+
+      expect(systemMessage?.content).toContain('## Recovery Handoff')
+      expect(systemMessage?.content).toContain('# Structured Handoff')
+      expect(systemMessage?.content).toContain(
+        'Continue the current run after summary compaction completes.'
+      )
+
       const finalizedCompaction =
         sqlitePresenter.deepchatMessagesTable.updateContentAndStatus.mock.calls.find(
           ([, , , metadata]: any[]) =>
@@ -3104,6 +3115,107 @@ describe('AgentRuntimePresenter', () => {
       expect(systemMessage?.content).toContain('## Recovery Handoff')
       expect(systemMessage?.content).toContain('# Structured Handoff')
       expect(systemMessage?.content).toContain('Recover run')
+    })
+
+    it('writes before_reset checkpoint and injects handoff markdown on retry', async () => {
+      await agent.initSession('s1', { providerId: 'openai', modelId: 'gpt-4' })
+      sqlitePresenter.deepchatRunsTable.insert({
+        id: 'run-1',
+        sessionId: 's1',
+        title: 'Retry run',
+        goal: 'Retry run',
+        status: 'ready',
+        stage: 'verify',
+        createdAt: 1,
+        updatedAt: 1
+      })
+      sqlitePresenter.deepchatMessagesTable.get.mockImplementation((id: string) => {
+        if (id === 'assistant-1') {
+          return {
+            id: 'assistant-1',
+            session_id: 's1',
+            order_seq: 2,
+            role: 'assistant',
+            content: JSON.stringify([]),
+            status: 'sent',
+            is_context_edge: 0,
+            metadata: '{}',
+            created_at: 2,
+            updated_at: 2
+          }
+        }
+
+        return undefined
+      })
+      sqlitePresenter.deepchatMessagesTable.getBySession.mockReturnValue([
+        {
+          id: 'user-1',
+          session_id: 's1',
+          order_seq: 1,
+          role: 'user',
+          content: JSON.stringify({
+            text: 'Retry this task',
+            files: [],
+            links: [],
+            search: false,
+            think: false
+          }),
+          status: 'sent',
+          is_context_edge: 0,
+          metadata: '{}',
+          created_at: 1,
+          updated_at: 1
+        },
+        {
+          id: 'assistant-1',
+          session_id: 's1',
+          order_seq: 2,
+          role: 'assistant',
+          content: JSON.stringify([]),
+          status: 'sent',
+          is_context_edge: 0,
+          metadata: '{}',
+          created_at: 2,
+          updated_at: 2
+        }
+      ])
+      sqlitePresenter.deepchatMessagesTable.getLastUserMessageBeforeOrAtOrderSeq.mockReturnValue({
+        id: 'user-1',
+        session_id: 's1',
+        order_seq: 1,
+        role: 'user',
+        content: JSON.stringify({
+          text: 'Retry this task',
+          files: [],
+          links: [],
+          search: false,
+          think: false
+        }),
+        status: 'sent',
+        is_context_edge: 0,
+        metadata: '{}',
+        created_at: 1,
+        updated_at: 1
+      })
+
+      await agent.retryMessage('s1', 'assistant-1')
+
+      expect(sqlitePresenter.deepchatRunCheckpointsTable.insert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          checkpointType: 'before_reset',
+          label: 'Before reset'
+        })
+      )
+
+      const retryStreamMessages = (processStream as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0]
+        ?.messages as Array<{ role: string; content: string }>
+      const retrySystemMessage = retryStreamMessages.find((message) => message.role === 'system')
+
+      expect(retrySystemMessage?.content).toContain('## Recovery Handoff')
+      expect(retrySystemMessage?.content).toContain('# Structured Handoff')
+      expect(retrySystemMessage?.content).toContain(
+        'Restart the current run from the selected message context with a fresh execution pass.'
+      )
     })
 
     it('treats an aborted resume signal as cancellation even for non-abort errors', async () => {

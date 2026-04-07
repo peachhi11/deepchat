@@ -10,7 +10,7 @@
 | Step 2: Active Run Lifecycle | 已完成 | 已补 `RunStateManager`、`RunSnapshotBuilder`、`getActiveRunSnapshot()` 与 `RUN_SNAPSHOT_UPDATED`，regular DeepChat session 现在会生成 durable active run snapshot。 |
 | Step 3: Permission Wait Backbone | 已完成 | 已补 `deepchat_run_steps`、`deepchat_run_checkpoints`、permission wait checkpoint / step / decision durable truth，并把 grant / deny / resume 接回 run snapshot。 |
 | Step 4: Structured Step Log | 已完成 | 已补 `tool_call` / `tool_result` / `failure` / `aborted` durable step log，`MAX_TOOL_CALLS` 现在会明确失败，不再伪装成完成。 |
-| Step 5: Checkpoint + Handoff on Compaction | 进行中 | 已补 `before_compaction` / `failure` checkpoint producer 和最小 `handoffBuilder`，但 recovery 还未消费 handoff。 |
+| Step 5: Checkpoint + Handoff on Compaction | 已完成 | 已补 `before_compaction` / `before_reset` / `failure` checkpoint producer，且 compaction、retry reset、resume recovery 都已开始消费 handoff。 |
 
 ## Step 1 交付
 
@@ -138,17 +138,19 @@
 - 当前 renderer 还没有消费完整 step timeline，但 main 侧已经具备可扩展的数据骨架
 - 这一步完成后，后续 `Run` tab / recovery / completion gate 不需要再从 message block 反推“到底做过什么”
 
-## Step 5 当前进展
+## Step 5 交付
 
 - 新增 `src/main/presenter/agentRuntimePresenter/handoffBuilder.ts`
 - `applyCompactionIntent()` 现在会在真正进入 compaction 前生成 `before_compaction` checkpoint
+- `retryMessage()` 现在会在删尾并 fresh restart 前生成 `before_reset` checkpoint
 - `failure` 路径现在除了写 failure step，还会同时生成 `failure` checkpoint
 - checkpoint payload 中开始携带最小 handoff markdown，供后续 recovery / reset 链路读取
 - `resumeAssistantMessage()` 现在会把 active checkpoint 里的 handoff markdown 注入 resume system prompt，作为第一条实际消费 handoff 的 recovery 路径
-- 当前仍未完成的部分：
-  - `before_reset`
-  - completion checkpoint
-  - 让更多 recovery 路径以 handoff 为主、transcript 为辅
+- `processMessage()` 现在会在 compaction 后把 active checkpoint 的 handoff markdown 注入下一轮 prompt
+- `retryMessage()` 触发的 reset 路径现在也会消费 `before_reset` checkpoint handoff，而不是只靠 transcript 回放
+- 本步刻意不实现 completion checkpoint：
+  - 它与 Step 7 的 completion gate 强绑定
+  - 提前落地只会制造“ready 冒充 completed”的伪真相
 
 ## 验证记录
 
@@ -182,6 +184,9 @@
 - `pnpm exec vitest --run test/main/presenter/agentRuntimePresenter/agentRuntimePresenter.test.ts`
   - 结果：`1 passed`
   - 说明：Step 5 当前子切片的 `before_compaction` / `failure` checkpoint producer 已通过 main 定向测试
+- `pnpm exec vitest --run test/main/presenter/agentRuntimePresenter/agentRuntimePresenter.test.ts`
+  - 结果：`1 passed`
+  - 说明：Step 5 收尾后，`before_reset` checkpoint、compaction handoff 注入、retry reset handoff 注入都已通过 main 定向测试
 - `pnpm run format`
   - 结果：通过
 - `pnpm run i18n`
@@ -194,8 +199,8 @@
 
 ## 下一步
 
-继续 Step 5
+继续 Step 6
 
-- 补 `before_reset`
-- 让至少一条 recovery 链路优先读取 checkpoint payload 中的 handoff markdown
-- 再决定是否需要引入独立 `deepchat_run_artifacts` 表来承载更重的 handoff / artifact ref
+- 开始 `Memory Fabric` 最小闭环
+- 优先落 `deepchat_memory_records`、`MemoryStore`、`MemoryManager`
+- 让 working set 开始摆脱“只靠 transcript replay”
