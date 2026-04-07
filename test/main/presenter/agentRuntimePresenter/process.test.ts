@@ -242,6 +242,38 @@ describe('processStream', () => {
     expect(toolResultMsg.content).toBe('Sunny, 72F')
   })
 
+  it('fails when the tool call budget is exceeded', async () => {
+    const coreStream = vi.fn(async function* () {
+      for (let index = 0; index < 129; index += 1) {
+        yield {
+          type: 'tool_call_start',
+          tool_call_id: `tc-${index}`,
+          tool_call_name: 'read'
+        } as LLMCoreStreamEvent
+        yield {
+          type: 'tool_call_end',
+          tool_call_id: `tc-${index}`,
+          tool_call_arguments_complete: JSON.stringify({ path: `file-${index}.ts` })
+        } as LLMCoreStreamEvent
+      }
+      yield { type: 'stop', stop_reason: 'tool_use' } as LLMCoreStreamEvent
+    }) as unknown as ProcessParams['coreStream']
+
+    const params = createParams({
+      coreStream,
+      tools: [makeTool('read')]
+    })
+
+    const result = await processStream(params)
+
+    expect(result).toMatchObject({
+      status: 'error',
+      stopReason: 'max_tool_calls',
+      errorMessage: 'Max tool call limit reached (129 > 128)'
+    })
+    expect(messageStore.setMessageError).toHaveBeenCalled()
+  })
+
   it('offloads large tool results before the next provider call', async () => {
     tempHome = await fs.mkdtemp(path.join(os.tmpdir(), 'deepchat-process-offload-'))
     getPathSpy = vi.spyOn(app, 'getPath').mockReturnValue(tempHome)

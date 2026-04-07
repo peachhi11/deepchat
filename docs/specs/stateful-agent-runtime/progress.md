@@ -9,7 +9,7 @@
 | Step 1: Minimal Run Truth | 已完成 | 已补 shared run contracts、`deepchat_runs` durable schema、`DeepChatRunStore`，并把 runtime 内部的 ephemeral `runId` 去歧义为 `generationId`。 |
 | Step 2: Active Run Lifecycle | 已完成 | 已补 `RunStateManager`、`RunSnapshotBuilder`、`getActiveRunSnapshot()` 与 `RUN_SNAPSHOT_UPDATED`，regular DeepChat session 现在会生成 durable active run snapshot。 |
 | Step 3: Permission Wait Backbone | 已完成 | 已补 `deepchat_run_steps`、`deepchat_run_checkpoints`、permission wait checkpoint / step / decision durable truth，并把 grant / deny / resume 接回 run snapshot。 |
-| Step 4: Structured Step Log | 未开始 | 下一步把 `tool_call` / `tool_result` / `failure` 等统一沉淀成结构化 step log。 |
+| Step 4: Structured Step Log | 已完成 | 已补 `tool_call` / `tool_result` / `failure` / `aborted` durable step log，`MAX_TOOL_CALLS` 现在会明确失败，不再伪装成完成。 |
 
 ## Step 1 交付
 
@@ -52,6 +52,25 @@
 | MessageList ...                                               |
 ```
 
+## Step 2 UI 形态（v1 island）
+
+```text
++--------------------------------------------------------------+
+| ChatTopBar                                      ╭──────────╮ |
+|                                                 │    ✓     │ |
++--------------------------------------------------------------+
+| ChatTopBar                            ╭────────────────────╮ |
+|                                       │ ● Need permission  │ |
+|                                       ╰────────────────────╯ |
++--------------------------------------------------------------+
+| MessageList ...                                               |
+```
+
+- `RunTicker` 已从普通内容流条目改成顶部居中的 sticky island 浮层
+- 视觉语言对齐 `ChatInputBox`：毛玻璃、细边框、柔和阴影、圆角胶囊
+- 当前为了尽快给用户可见完成反馈，`ready` 与 `completed` 都会折叠成 `✓`
+- 等 Step 7 completion gate 落地后，再把折叠语义收窄回真正的 `completed`
+
 ## Step 3 交付
 
 - 新增 shared contracts：
@@ -82,6 +101,42 @@
 | MessageList ...                                               |
 ```
 
+## Step 4 交付
+
+- 扩展 shared contracts：
+  - `RunStepKind` 新增 `tool_call`、`tool_result`、`failure`、`aborted`
+- `AgentRuntimePresenter` 新增 structured step helpers：
+  - `recordToolCallStep()`
+  - `recordToolResultStep()`
+  - `recordFailureStep()`
+  - `recordAbortedStep()`
+- `runStreamForMessage()` 现在会在真实工具执行链路上写 durable step log：
+  - tool 开始执行时写 `tool_call`
+  - tool 成功返回时写 `tool_result`
+  - tool 失败时写 failed `tool_result`
+- `payloadJson` 现在统一包含最小结构化字段：
+  - `effectClass`
+  - `evidence`
+  - `toolName`
+  - `toolArgs`
+  - `responsePreview` / `responseLength`（在 `tool_result` 中）
+- `dispatch.ts` 现在会推导 v1 `effectClass`：
+  - `read`
+  - `write`
+  - `command`
+  - `other`
+- 成功的只读型工具结果现在会标记 `evidence=true`
+- 终止态现在具备 durable step log：
+  - `MAX_TOOL_CALLS` 会写 `failure`，并返回显式 error
+  - provider/runtime error 会写 `failure`
+  - manual cancel / aborted resume 会写 `aborted`
+
+## Step 4 UI / 验证意义
+
+- 顶部 island ticker 现在不只是“视觉上像状态条”，其摘要背后开始有结构化 step truth 可依赖
+- 当前 renderer 还没有消费完整 step timeline，但 main 侧已经具备可扩展的数据骨架
+- 这一步完成后，后续 `Run` tab / recovery / completion gate 不需要再从 message block 反推“到底做过什么”
+
 ## 验证记录
 
 - `pnpm exec vitest --run test/main/presenter/agentRuntimePresenter/runStore.test.ts test/main/presenter/sqlitePresenter.test.ts test/main/presenter/agentRuntimePresenter/agentRuntimePresenter.test.ts test/main/presenter/remoteControlPresenter/remoteConversationRunner.test.ts`
@@ -105,6 +160,12 @@
 - `pnpm exec vitest --run test/main/presenter/agentRuntimePresenter/agentRuntimePresenter.test.ts test/main/presenter/agentSessionPresenter/integration.test.ts test/main/presenter/sqlitePresenter.test.ts`
   - 结果：`2 passed | 1 skipped`
   - 说明：Step 3 的 permission wait / resume durable truth 已通过 main 定向测试；`sqlitePresenter.test.ts` 仍因当前环境 sqlite native 依赖不可用被跳过
+- `pnpm exec vitest --run test/renderer/components/RunTicker.test.ts test/renderer/components/ChatPage.test.ts`
+  - 结果：`2 passed`
+  - 说明：island ticker 的 compact / active 两态、`ChatPage` 顶部 sticky overlay 接线都已通过 renderer 定向测试
+- `pnpm exec vitest --run test/main/presenter/agentRuntimePresenter/process.test.ts test/main/presenter/agentRuntimePresenter/dispatch.test.ts test/main/presenter/agentRuntimePresenter/agentRuntimePresenter.test.ts test/renderer/components/RunTicker.test.ts test/renderer/components/ChatPage.test.ts`
+  - 结果：`5 passed`
+  - 说明：Step 4 的 structured step log、`MAX_TOOL_CALLS` failure、tool hook metadata、island ticker UI 全部已通过定向测试
 - `pnpm run format`
   - 结果：通过
 - `pnpm run i18n`
@@ -117,8 +178,8 @@
 
 ## 下一步
 
-Step 4: Structured Step Log
+Step 5: Checkpoint + Handoff on Compaction
 
-- 把 `tool_call` / `tool_result` / `decision` / `failure` 统一落成 `StepRecord`
-- 为 `MAX_TOOL_CALLS`、abort、provider error 建立结构化 failure 记录
-- 让 “这次 run 做了什么、卡在哪里、为什么结束” 不再依赖 message block 逆向推断
+- 新增 `CheckpointManager`
+- 让 `before_compaction` / `before_reset` / `failure` 也产出 durable checkpoint
+- 开始把长上下文恢复链路从 transcript replay 挪向 checkpoint / handoff

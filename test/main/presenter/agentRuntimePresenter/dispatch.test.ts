@@ -224,6 +224,56 @@ describe('dispatch', () => {
       expect(toolBlock!.status).toBe('success')
     })
 
+    it('reports structured tool hook metadata for read-only evidence steps', async () => {
+      const tools = [makeTool('read')]
+      const toolPresenter = createMockToolPresenter({ read: 'File contents' })
+      const hooks = {
+        onPreToolUse: vi.fn(),
+        onPostToolUse: vi.fn()
+      }
+
+      state.blocks.push({
+        type: 'tool_call',
+        content: '',
+        status: 'pending',
+        timestamp: Date.now(),
+        tool_call: { id: 'tc-read', name: 'read', params: '{"path":"README.md"}', response: '' }
+      })
+      state.completedToolCalls = [
+        { id: 'tc-read', name: 'read', arguments: '{"path":"README.md"}' }
+      ]
+
+      await executeTools(
+        state,
+        [],
+        0,
+        tools,
+        toolPresenter,
+        'gpt-4',
+        io,
+        'full_access',
+        new ToolOutputGuard(),
+        32000,
+        1024,
+        hooks
+      )
+
+      expect(hooks.onPreToolUse).toHaveBeenCalledWith(
+        expect.objectContaining({
+          callId: 'tc-read',
+          effectClass: 'read'
+        })
+      )
+      expect(hooks.onPostToolUse).toHaveBeenCalledWith(
+        expect.objectContaining({
+          callId: 'tc-read',
+          effectClass: 'read',
+          evidence: true,
+          response: 'File contents'
+        })
+      )
+    })
+
     it('persists final-only subagent tool payloads', async () => {
       const tools = [makeTool('subagent_orchestrator')]
       const toolPresenter = createMockToolPresenter()
@@ -1365,12 +1415,15 @@ describe('dispatch', () => {
       expect(executed.terminalError).toContain('remaining context window is too small')
       expect(conversation.find((message: any) => message.role === 'tool')).toBeUndefined()
       expect(state.blocks[0].status).toBe('error')
-      expect(hooks.onPostToolUseFailure).toHaveBeenCalledWith({
-        callId: 'tc1',
-        name: 'cdp_send',
-        params: '{"method":"Page.captureScreenshot"}',
-        error: expect.stringContaining('remaining context window is too small')
-      })
+      expect(hooks.onPostToolUseFailure).toHaveBeenCalledWith(
+        expect.objectContaining({
+          callId: 'tc1',
+          name: 'cdp_send',
+          params: '{"method":"Page.captureScreenshot"}',
+          effectClass: 'other',
+          error: expect.stringContaining('remaining context window is too small')
+        })
+      )
       await expect(
         fs.access(path.join(tempHome, '.deepchat', 'sessions', 's1', 'tool_tc1.offload'))
       ).rejects.toThrow()

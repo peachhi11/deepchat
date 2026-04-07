@@ -12,8 +12,14 @@
         :project="sessionProject"
         :is-read-only="isReadOnlySession"
       />
-      <RunTicker v-if="runSnapshot" class="chat-capture-hide" :snapshot="runSnapshot" />
-      <div v-if="isChatSearchOpen" class="pointer-events-none sticky top-14 z-20 px-6">
+      <div v-if="runSnapshot" class="pointer-events-none sticky top-2 z-20 px-4 pb-3">
+        <RunTicker class="chat-capture-hide pointer-events-auto" :snapshot="runSnapshot" />
+      </div>
+      <div
+        v-if="isChatSearchOpen"
+        class="pointer-events-none sticky z-10 px-6"
+        :class="runSnapshot ? 'top-16' : 'top-14'"
+      >
         <div class="mx-auto flex w-full max-w-5xl justify-end">
           <ChatSearchBar
             ref="chatSearchBarRef"

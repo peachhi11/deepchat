@@ -17,6 +17,8 @@ const CONTEXT_WINDOW_ERROR_PATTERNS = [
 ]
 const USER_CANCELED_GENERATION_ERROR = 'common.error.userCanceledGeneration'
 const NO_MODEL_RESPONSE_ERROR = 'common.error.noModelResponse'
+const buildMaxToolCallsError = (count: number) =>
+  `Max tool call limit reached (${count} > ${MAX_TOOL_CALLS})`
 
 function isAbortError(error: unknown): boolean {
   return error instanceof Error && (error.name === 'AbortError' || error.name === 'CanceledError')
@@ -172,10 +174,20 @@ export async function processStream(params: ProcessParams): Promise<ProcessResul
 
       // Check max tool call limit
       if (toolCallCount + state.completedToolCalls.length > MAX_TOOL_CALLS) {
+        const maxToolCallsError = buildMaxToolCallsError(
+          toolCallCount + state.completedToolCalls.length
+        )
         console.log(
           `[ProcessStream] max tool calls reached (${toolCallCount + state.completedToolCalls.length} > ${MAX_TOOL_CALLS}), stopping`
         )
-        break
+        finalizeError(state, io, maxToolCallsError)
+        return {
+          status: 'error' as const,
+          terminalError: maxToolCallsError,
+          stopReason: 'max_tool_calls',
+          errorMessage: maxToolCallsError,
+          usage: buildUsageSnapshot(state)
+        }
       }
 
       // Execute tools and continue loop (toolPresenter is guaranteed non-null here

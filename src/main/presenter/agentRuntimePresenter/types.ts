@@ -29,6 +29,8 @@ export interface ToolCallResult {
   serverDescription?: string
 }
 
+export type ToolStepEffectClass = 'read' | 'write' | 'command' | 'other'
+
 export interface StreamState {
   blocks: AssistantMessageBlock[]
   metadata: MessageMetadata
@@ -48,18 +50,34 @@ export interface IoParams {
 }
 
 export interface ProcessHooks {
-  onPreToolUse?: (tool: { callId?: string; name?: string; params?: string }) => void
+  onPreToolUse?: (tool: {
+    callId?: string
+    name?: string
+    params?: string
+    effectClass?: ToolStepEffectClass
+  }) => void
   onPostToolUse?: (tool: {
     callId?: string
     name?: string
     params?: string
     response?: string
+    effectClass?: ToolStepEffectClass
+    evidence?: boolean
+    offloadPath?: string
+    rtkApplied?: boolean
+    rtkMode?: 'rewrite' | 'direct' | 'bypass'
+    rtkFallbackReason?: string
   }) => void
   onPostToolUseFailure?: (tool: {
     callId?: string
     name?: string
     params?: string
     error?: string
+    effectClass?: ToolStepEffectClass
+    offloadPath?: string
+    rtkApplied?: boolean
+    rtkMode?: 'rewrite' | 'direct' | 'bypass'
+    rtkFallbackReason?: string
   }) => void
   onPermissionRequest?: (
     permission: NonNullable<PendingToolInteraction['permission']>,

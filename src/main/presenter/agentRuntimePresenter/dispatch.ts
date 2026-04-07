@@ -17,7 +17,8 @@ import type {
   IoParams,
   PendingToolInteraction,
   ProcessHooks,
-  StreamState
+  StreamState,
+  ToolStepEffectClass
 } from './types'
 import type { ChatMessage } from '@shared/types/core/chat-message'
 import { nanoid } from 'nanoid'
@@ -67,6 +68,43 @@ type PermissionRequestLike = {
   requestId?: string
   rememberable?: boolean
   paths?: string[]
+}
+
+function parseToolArgsObject(toolArgs: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(toolArgs) as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return null
+    }
+    return parsed as Record<string, unknown>
+  } catch {
+    return null
+  }
+}
+
+function classifyToolEffect(toolName: string, toolArgs: string): ToolStepEffectClass {
+  if (toolName === 'exec') {
+    return 'command'
+  }
+
+  if (toolName === 'write' || toolName === 'edit') {
+    return 'write'
+  }
+
+  if (toolName === 'read' || toolName === 'ls' || toolName === 'find' || toolName === 'grep') {
+    return 'read'
+  }
+
+  if (toolName === 'process') {
+    const parsedArgs = parseToolArgsObject(toolArgs)
+    const action = typeof parsedArgs?.action === 'string' ? parsedArgs.action : ''
+    if (action === 'write' || action === 'kill' || action === 'clear' || action === 'remove') {
+      return 'command'
+    }
+    return 'read'
+  }
+
+  return 'other'
 }
 
 function extractTextFromBlocks(blocks: AssistantMessageBlock[]): string {
@@ -341,14 +379,25 @@ function applyFinalizedToolResults(params: {
         callId: stagedResult.toolCallId,
         name: stagedResult.toolName,
         params: stagedResult.toolArgs,
-        error: fittedResult.responseText
+        error: fittedResult.responseText,
+        effectClass: classifyToolEffect(stagedResult.toolName, stagedResult.toolArgs),
+        offloadPath: stagedResult.offloadPath,
+        rtkApplied: stagedResult.rtkApplied,
+        rtkMode: stagedResult.rtkMode,
+        rtkFallbackReason: stagedResult.rtkFallbackReason
       })
     } else if (stagedResult.postHookKind === 'success') {
       hooks?.onPostToolUse?.({
         callId: stagedResult.toolCallId,
         name: stagedResult.toolName,
         params: stagedResult.toolArgs,
-        response: fittedResult.responseText
+        response: fittedResult.responseText,
+        effectClass: classifyToolEffect(stagedResult.toolName, stagedResult.toolArgs),
+        evidence: classifyToolEffect(stagedResult.toolName, stagedResult.toolArgs) === 'read',
+        offloadPath: stagedResult.offloadPath,
+        rtkApplied: stagedResult.rtkApplied,
+        rtkMode: stagedResult.rtkMode,
+        rtkFallbackReason: stagedResult.rtkFallbackReason
       })
     }
   }
@@ -690,7 +739,8 @@ export async function executeTools(
       hooks?.onPreToolUse?.({
         callId: tc.id,
         name: tc.name,
-        params: tc.arguments
+        params: tc.arguments,
+        effectClass: classifyToolEffect(tc.name, tc.arguments)
       })
 
       const applyProgressUpdate = (update: AgentToolProgressUpdate) => {

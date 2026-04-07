@@ -63,7 +63,12 @@ import { RunSnapshotBuilder } from './runSnapshotBuilder'
 import { RunStateManager } from './runStateManager'
 import { DeepChatRunStore } from './runStore'
 import { DeepChatSessionStore, type SessionSummaryState } from './sessionStore'
-import type { InterleavedReasoningConfig, PendingToolInteraction, ProcessResult } from './types'
+import type {
+  InterleavedReasoningConfig,
+  PendingToolInteraction,
+  ProcessResult,
+  ToolStepEffectClass
+} from './types'
 import { ToolOutputGuard } from './toolOutputGuard'
 import type { ProviderRequestTracePayload } from '../llmProviderPresenter/requestTrace'
 import type { NewSessionHooksBridge } from '../hooksNotifications/newSessionBridge'
@@ -652,6 +657,12 @@ export class AgentRuntimePresenter implements IAgentImplementation {
           errorMessage: 'common.error.userCanceledGeneration'
         })
         if (activeRun) {
+          this.recordAbortedStep(activeRun.id, {
+            sessionId,
+            messageId: assistantMessageId ?? userMessageId ?? null,
+            source: 'process_message',
+            stopReason: 'user_stop'
+          })
           activeRun = this.runStateManager.markAborted(activeRun.id)
           this.emitRunSnapshotUpdate(sessionId, activeRun)
         }
@@ -683,6 +694,13 @@ export class AgentRuntimePresenter implements IAgentImplementation {
         error: { message: errorMessage }
       })
       if (activeRun) {
+        this.recordFailureStep(activeRun.id, {
+          sessionId,
+          messageId: assistantMessageId ?? userMessageId ?? null,
+          source: 'process_message',
+          stopReason: 'error',
+          errorMessage
+        })
         activeRun = this.runStateManager.markFailed(activeRun.id)
         this.emitRunSnapshotUpdate(sessionId, activeRun)
       }
@@ -1084,6 +1102,12 @@ export class AgentRuntimePresenter implements IAgentImplementation {
     }
     this.abortDeferredToolAbortControllers(sessionId)
     if (latestRun) {
+      this.recordAbortedStep(latestRun.id, {
+        sessionId,
+        messageId: activeGeneration?.messageId ?? null,
+        source: 'cancel_generation',
+        stopReason: 'user_stop'
+      })
       latestRun = this.runStateManager.markAborted(latestRun.id)
       this.emitRunSnapshotUpdate(sessionId, latestRun)
     }
@@ -1684,6 +1708,16 @@ export class AgentRuntimePresenter implements IAgentImplementation {
         initialBlocks,
         hooks: {
           onPreToolUse: (tool) => {
+            if (runId && tool.callId) {
+              this.recordToolCallStep(runId, {
+                sessionId,
+                messageId,
+                toolCallId: tool.callId,
+                toolName: tool.name ?? 'tool',
+                toolArgs: tool.params ?? '',
+                effectClass: tool.effectClass
+              })
+            }
             this.dispatchHook('PreToolUse', {
               sessionId,
               messageId,
@@ -1694,6 +1728,23 @@ export class AgentRuntimePresenter implements IAgentImplementation {
             })
           },
           onPostToolUse: (tool) => {
+            if (runId && tool.callId) {
+              this.recordToolResultStep(runId, {
+                sessionId,
+                messageId,
+                toolCallId: tool.callId,
+                toolName: tool.name ?? 'tool',
+                toolArgs: tool.params ?? '',
+                effectClass: tool.effectClass,
+                responseText: tool.response ?? '',
+                isError: false,
+                evidence: tool.evidence,
+                offloadPath: tool.offloadPath,
+                rtkApplied: tool.rtkApplied,
+                rtkMode: tool.rtkMode,
+                rtkFallbackReason: tool.rtkFallbackReason
+              })
+            }
             this.dispatchHook('PostToolUse', {
               sessionId,
               messageId,
@@ -1704,6 +1755,22 @@ export class AgentRuntimePresenter implements IAgentImplementation {
             })
           },
           onPostToolUseFailure: (tool) => {
+            if (runId && tool.callId) {
+              this.recordToolResultStep(runId, {
+                sessionId,
+                messageId,
+                toolCallId: tool.callId,
+                toolName: tool.name ?? 'tool',
+                toolArgs: tool.params ?? '',
+                effectClass: tool.effectClass,
+                responseText: tool.error ?? '',
+                isError: true,
+                offloadPath: tool.offloadPath,
+                rtkApplied: tool.rtkApplied,
+                rtkMode: tool.rtkMode,
+                rtkFallbackReason: tool.rtkFallbackReason
+              })
+            }
             this.dispatchHook('PostToolUseFailure', {
               sessionId,
               messageId,
@@ -2020,8 +2087,19 @@ export class AgentRuntimePresenter implements IAgentImplementation {
     } else if (result.status === 'paused') {
       nextRun = this.runStore.get(runId)
     } else if (result.status === 'aborted') {
+      this.recordAbortedStep(runId, {
+        sessionId,
+        source: 'process_result',
+        stopReason: result.stopReason
+      })
       nextRun = this.runStateManager.markAborted(runId)
     } else {
+      this.recordFailureStep(runId, {
+        sessionId,
+        source: 'process_result',
+        stopReason: result.stopReason,
+        errorMessage: result.errorMessage || result.terminalError || 'Unknown runtime error'
+      })
       nextRun = this.runStateManager.markFailed(runId)
     }
 
@@ -2135,6 +2213,13 @@ export class AgentRuntimePresenter implements IAgentImplementation {
           })
           this.setSessionStatus(sessionId, 'error')
           if (activeRun) {
+            this.recordFailureStep(activeRun.id, {
+              sessionId,
+              messageId,
+              source: 'resume_budget',
+              stopReason: 'error',
+              errorMessage: resumeBudget.message
+            })
             activeRun = this.runStateManager.markFailed(activeRun.id)
             this.emitRunSnapshotUpdate(sessionId, activeRun)
           }
@@ -2180,6 +2265,12 @@ export class AgentRuntimePresenter implements IAgentImplementation {
           errorMessage: 'common.error.userCanceledGeneration'
         })
         if (activeRun) {
+          this.recordAbortedStep(activeRun.id, {
+            sessionId,
+            messageId,
+            source: 'resume_message',
+            stopReason: 'user_stop'
+          })
           activeRun = this.runStateManager.markAborted(activeRun.id)
           this.emitRunSnapshotUpdate(sessionId, activeRun)
         }
@@ -2191,6 +2282,13 @@ export class AgentRuntimePresenter implements IAgentImplementation {
       this.messageStore.setMessageError(messageId, blocks)
       this.emitMessageRefresh(sessionId, messageId)
       if (activeRun) {
+        this.recordFailureStep(activeRun.id, {
+          sessionId,
+          messageId,
+          source: 'resume_message',
+          stopReason: 'error',
+          errorMessage
+        })
         activeRun = this.runStateManager.markFailed(activeRun.id)
         this.emitRunSnapshotUpdate(sessionId, activeRun)
       }
@@ -4029,6 +4127,205 @@ export class AgentRuntimePresenter implements IAgentImplementation {
 
     const run = this.runStateManager.markRecovering(runId)
     this.emitRunSnapshotUpdate(params.sessionId, run)
+  }
+
+  private buildDeterministicRunStepId(
+    runId: string,
+    kind: 'tool_call' | 'tool_result' | 'failure' | 'aborted',
+    identity: string
+  ): string {
+    return `${runId}:${kind}:${identity}`
+  }
+
+  private buildStepPayload(payload: Record<string, unknown>): string {
+    return JSON.stringify(payload)
+  }
+
+  private truncateStepText(value: string, maxLength = 2000): string {
+    if (value.length <= maxLength) {
+      return value
+    }
+
+    return `${value.slice(0, maxLength)}\n...[truncated ${value.length - maxLength} chars]`
+  }
+
+  private upsertRunStep(step: RunStepRecord): void {
+    const existing = this.runStepStore.get(step.id)
+    if (!existing) {
+      this.runStepStore.create(step)
+      return
+    }
+
+    this.runStepStore.update(step.id, {
+      title: step.title,
+      status: step.status,
+      payloadJson: step.payloadJson ?? null,
+      updatedAt: step.updatedAt,
+      completedAt: step.completedAt ?? null
+    })
+  }
+
+  private recordToolCallStep(
+    runId: string,
+    params: {
+      sessionId: string
+      messageId: string
+      toolCallId: string
+      toolName: string
+      toolArgs: string
+      effectClass?: ToolStepEffectClass
+    }
+  ): void {
+    const now = Date.now()
+    const effectClass = params.effectClass ?? 'other'
+
+    this.upsertRunStep({
+      id: this.buildDeterministicRunStepId(runId, 'tool_call', params.toolCallId),
+      runId,
+      sessionId: params.sessionId,
+      messageId: params.messageId,
+      toolCallId: params.toolCallId,
+      kind: 'tool_call',
+      title: `Call ${params.toolName}`,
+      status: 'pending',
+      payloadJson: this.buildStepPayload({
+        effectClass,
+        evidence: false,
+        toolName: params.toolName,
+        toolArgs: params.toolArgs
+      }),
+      createdAt: now,
+      updatedAt: now,
+      completedAt: null
+    })
+  }
+
+  private recordToolResultStep(
+    runId: string,
+    params: {
+      sessionId: string
+      messageId: string
+      toolCallId: string
+      toolName: string
+      toolArgs: string
+      effectClass?: ToolStepEffectClass
+      responseText: string
+      isError: boolean
+      evidence?: boolean
+      offloadPath?: string
+      rtkApplied?: boolean
+      rtkMode?: 'rewrite' | 'direct' | 'bypass'
+      rtkFallbackReason?: string
+    }
+  ): void {
+    const now = Date.now()
+    const effectClass = params.effectClass ?? 'other'
+    const toolCallStepStatus = params.isError ? 'failed' : 'completed'
+    const toolCallStepId = this.buildDeterministicRunStepId(runId, 'tool_call', params.toolCallId)
+    const existingToolCallStep = this.runStepStore.get(toolCallStepId)
+
+    if (existingToolCallStep) {
+      this.runStepStore.update(toolCallStepId, {
+        status: toolCallStepStatus,
+        updatedAt: now,
+        completedAt: now
+      })
+    }
+
+    this.upsertRunStep({
+      id: this.buildDeterministicRunStepId(runId, 'tool_result', params.toolCallId),
+      runId,
+      sessionId: params.sessionId,
+      messageId: params.messageId,
+      toolCallId: params.toolCallId,
+      kind: 'tool_result',
+      title: params.isError ? `Tool failed: ${params.toolName}` : `Tool result: ${params.toolName}`,
+      status: params.isError ? 'failed' : 'completed',
+      payloadJson: this.buildStepPayload({
+        effectClass,
+        evidence: params.isError ? false : params.evidence === true,
+        toolName: params.toolName,
+        toolArgs: params.toolArgs,
+        responsePreview: this.truncateStepText(params.responseText),
+        responseLength: params.responseText.length,
+        isError: params.isError,
+        ...(params.offloadPath ? { offloadPath: params.offloadPath } : {}),
+        ...(typeof params.rtkApplied === 'boolean' ? { rtkApplied: params.rtkApplied } : {}),
+        ...(params.rtkMode ? { rtkMode: params.rtkMode } : {}),
+        ...(params.rtkFallbackReason ? { rtkFallbackReason: params.rtkFallbackReason } : {})
+      }),
+      createdAt: now,
+      updatedAt: now,
+      completedAt: now
+    })
+  }
+
+  private recordFailureStep(
+    runId: string,
+    params: {
+      sessionId: string
+      messageId?: string | null
+      stopReason?: string
+      errorMessage: string
+      source: string
+    }
+  ): void {
+    const now = Date.now()
+    const identity = params.messageId?.trim() || params.source
+
+    this.upsertRunStep({
+      id: this.buildDeterministicRunStepId(runId, 'failure', identity),
+      runId,
+      sessionId: params.sessionId,
+      messageId: params.messageId ?? null,
+      toolCallId: null,
+      kind: 'failure',
+      title: params.stopReason === 'max_tool_calls' ? 'Run failed: max tool calls' : 'Run failed',
+      status: 'failed',
+      payloadJson: this.buildStepPayload({
+        effectClass: 'other',
+        evidence: false,
+        source: params.source,
+        stopReason: params.stopReason ?? 'error',
+        errorMessage: params.errorMessage
+      }),
+      createdAt: now,
+      updatedAt: now,
+      completedAt: now
+    })
+  }
+
+  private recordAbortedStep(
+    runId: string,
+    params: {
+      sessionId: string
+      messageId?: string | null
+      stopReason?: string
+      source: string
+    }
+  ): void {
+    const now = Date.now()
+    const identity = params.messageId?.trim() || params.source
+
+    this.upsertRunStep({
+      id: this.buildDeterministicRunStepId(runId, 'aborted', identity),
+      runId,
+      sessionId: params.sessionId,
+      messageId: params.messageId ?? null,
+      toolCallId: null,
+      kind: 'aborted',
+      title: 'Run aborted',
+      status: 'completed',
+      payloadJson: this.buildStepPayload({
+        effectClass: 'other',
+        evidence: false,
+        source: params.source,
+        stopReason: params.stopReason ?? 'user_stop'
+      }),
+      createdAt: now,
+      updatedAt: now,
+      completedAt: now
+    })
   }
 
   private invalidateSummaryIfNeeded(sessionId: string, orderSeq: number): void {

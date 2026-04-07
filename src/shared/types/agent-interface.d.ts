@@ -48,7 +48,7 @@ export type RunStatus =
 
 export type RunStage = 'intent' | 'plan' | 'task' | 'verify' | 'handoff'
 
-export type RunStepKind = 'wait' | 'decision'
+export type RunStepKind = 'wait' | 'decision' | 'tool_call' | 'tool_result' | 'failure' | 'aborted'
 export type RunStepStatus = 'pending' | 'completed' | 'failed'
 export type RunCheckpointType =
   | 'before_wait'

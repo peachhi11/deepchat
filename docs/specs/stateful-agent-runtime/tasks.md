@@ -7,7 +7,7 @@
 - [x] Step 1: Minimal Run Truth
 - [x] Step 2: Active Run Lifecycle
 - [x] Step 3: Permission Wait Backbone
-- [ ] Step 4: Structured Step Log
+- [x] Step 4: Structured Step Log
 - [ ] Step 5: Checkpoint + Handoff on Compaction
 - [ ] Step 6: Memory Baseline
 - [ ] Step 7: Single-Root Task + Completion Gate
@@ -37,8 +37,8 @@
 - [x] 新增 `RunSnapshot`
 - [x] 新增 `deepchat_runs` table
 - [ ] 新增 `deepchat_run_tasks` table
-- [ ] 新增 `deepchat_run_steps` table
-- [ ] 新增 `deepchat_run_checkpoints` table
+- [x] 新增 `deepchat_run_steps` table
+- [x] 新增 `deepchat_run_checkpoints` table
 - [ ] 新增 `deepchat_run_artifacts` table
 - [x] 新增 `DeepChatRunStore`
 - [x] 在 `SQLitePresenter` 中注册 `deepchat_runs` 表与迁移版本
@@ -60,9 +60,9 @@
 - [x] `agentRuntimePresenter.processMessage()` 开始前接入 `RunStateManager`
 - [ ] `process.ts` 每轮 step 生成 `stepId`
 - [x] permission wait / decision 写入 `StepRecord`
-- [ ] `dispatch.ts` 的 tool_call / tool_result 写入 `StepRecord`
+- [x] `dispatch.ts` 的 tool_call / tool_result 写入 `StepRecord`
 - [ ] completion 路径先进入 `evaluating`，再决定 `completed` 或 reopen
-- [ ] `MAX_TOOL_CALLS`、abort、provider error 都能产出结构化 failure step
+- [x] `MAX_TOOL_CALLS`、abort、provider error 都能产出结构化 failure step
 
 ## T4 Checkpoint 与 Handoff
 
@@ -96,12 +96,12 @@
 ## T7 Renderer: `Run Ticker`
 
 - [x] 新增 `src/renderer/src/components/chat/RunTicker.vue`（v0 可见壳）
-- [x] 在 `ChatPage.vue` 中插入 `Run Ticker`（v0 非 sticky 版本）
-- [ ] `Run Ticker` 支持单行窄宽毛玻璃胶囊样式
+- [x] 在 `ChatPage.vue` 中插入 `Run Ticker`（现为顶部 sticky island 浮层）
+- [x] `Run Ticker` 支持单行窄宽毛玻璃胶囊样式
 - [ ] `Run Ticker` 支持中段摘要缓慢滚动
 - [ ] `hover` 时暂停滚动
 - [ ] `waiting_permission` / `waiting_external` / `failed` 时固定显示，不滚动
-- [ ] `completed` 时收起成 `✓`
+- [x] `ready/completed` 暂时都收起成 `✓`（completion gate 落地后再只保留 `completed`）
 - [ ] 点击 `✓` 后打开 `Run` tab 并消失
 - [ ] 为新文案增加 i18n key
 
@@ -147,7 +147,7 @@
 - [ ] Main：checkpoint / handoff / recovery 测试
 - [ ] Main：memory write / retrieval / evidence gating 测试
 - [ ] Main：trace timeline 测试
-- [ ] Renderer：`Run Ticker` 行为测试
+- [x] Renderer：`Run Ticker` 行为测试
 - [ ] Renderer：sidepanel `Run` tab 测试
 - [ ] Integration：permission wait -> resume
 - [ ] Integration：compaction -> handoff -> continue
@@ -155,8 +155,8 @@
 
 ## T13 质量门禁
 
-- [ ] `pnpm run format`
-- [ ] `pnpm run i18n`
-- [ ] `pnpm run lint`
-- [ ] `pnpm run typecheck`
-- [ ] 运行相关 main / renderer / integration 测试并记录结果
+- [x] `pnpm run format`
+- [x] `pnpm run i18n`
+- [x] `pnpm run lint`
+- [x] `pnpm run typecheck`
+- [x] 运行相关 main / renderer / integration 测试并记录结果

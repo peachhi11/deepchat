@@ -384,9 +384,8 @@ describe('ChatPage', () => {
     })
 
     expect(agentSessionPresenter.getActiveRunSnapshot).toHaveBeenCalledWith('s1')
-    expect(wrapper.text()).toContain('ready')
-    expect(wrapper.text()).toContain('Implement run ticker')
-    expect(wrapper.text()).toContain('verify')
+    expect(wrapper.find('[data-run-ticker="compact"]').exists()).toBe(true)
+    expect(wrapper.find('[data-run-status="ready"]').exists()).toBe(true)
   })
 
   it('updates the run ticker when a run snapshot IPC event arrives', async () => {
@@ -410,9 +409,10 @@ describe('ChatPage', () => {
     })
     await flushPromises()
 
-    expect(wrapper.text()).toContain('executing')
+    expect(wrapper.find('[data-run-ticker="active"]').exists()).toBe(true)
+    expect(wrapper.find('[data-run-status="executing"]').exists()).toBe(true)
     expect(wrapper.text()).toContain('Handle permission wait')
-    expect(wrapper.text()).toContain('task')
+    expect(wrapper.text()).toContain('Task')
   })
 
   it('keeps pending lane visible below the tool interaction overlay', async () => {

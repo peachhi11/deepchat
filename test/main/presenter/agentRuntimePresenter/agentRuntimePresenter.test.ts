@@ -725,6 +725,88 @@ describe('AgentRuntimePresenter', () => {
       )
     })
 
+    it('persists tool_call and tool_result steps for successful tool execution', async () => {
+      ;(processStream as ReturnType<typeof vi.fn>).mockImplementationOnce(async (params) => {
+        params.hooks?.onPreToolUse?.({
+          callId: 'tool-1',
+          name: 'read',
+          params: '{"path":"README.md"}',
+          effectClass: 'read'
+        })
+        params.hooks?.onPostToolUse?.({
+          callId: 'tool-1',
+          name: 'read',
+          params: '{"path":"README.md"}',
+          response: 'README content',
+          effectClass: 'read',
+          evidence: true
+        })
+
+        return {
+          status: 'completed',
+          stopReason: 'complete'
+        }
+      })
+
+      await agent.initSession('s1', { providerId: 'openai', modelId: 'gpt-4' })
+      await agent.processMessage('s1', 'Inspect the repository readme')
+
+      const insertedSteps = sqlitePresenter.deepchatRunStepsTable.insert.mock.calls.map(
+        ([row]: [Record<string, unknown>]) => row
+      )
+
+      expect(insertedSteps).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            kind: 'tool_call',
+            toolCallId: 'tool-1',
+            status: 'pending',
+            title: 'Call read'
+          }),
+          expect.objectContaining({
+            kind: 'tool_result',
+            toolCallId: 'tool-1',
+            status: 'completed',
+            title: 'Tool result: read'
+          })
+        ])
+      )
+      expect(sqlitePresenter.deepchatRunStepsTable.update).toHaveBeenCalledWith(
+        expect.stringContaining(':tool_call:tool-1'),
+        expect.objectContaining({
+          status: 'completed',
+          completed_at: expect.any(Number)
+        })
+      )
+      const toolResultStep = insertedSteps.find((step) => step.kind === 'tool_result')
+      expect(JSON.parse(toolResultStep?.payloadJson as string)).toMatchObject({
+        effectClass: 'read',
+        evidence: true,
+        toolName: 'read',
+        responsePreview: 'README content'
+      })
+    })
+
+    it('persists failure steps when the run ends with an error', async () => {
+      ;(processStream as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        status: 'error',
+        stopReason: 'max_tool_calls',
+        errorMessage: 'Max tool call limit reached (129 > 128)',
+        terminalError: 'Max tool call limit reached (129 > 128)'
+      })
+
+      await agent.initSession('s1', { providerId: 'openai', modelId: 'gpt-4' })
+      await agent.processMessage('s1', 'Loop until failure')
+
+      expect(sqlitePresenter.deepchatRunStepsTable.insert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          kind: 'failure',
+          status: 'failed',
+          title: 'Run failed: max tool calls'
+        })
+      )
+    })
+
     it('calls processStream with correct params', async () => {
       await agent.initSession('s1', { providerId: 'openai', modelId: 'gpt-4' })
       await agent.processMessage('s1', 'Hello')
