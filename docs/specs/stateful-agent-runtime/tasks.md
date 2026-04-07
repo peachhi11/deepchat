@@ -102,6 +102,7 @@
 - [ ] `hover` 时暂停滚动
 - [ ] `waiting_permission` / `waiting_external` / `failed` 时固定显示，不滚动
 - [x] `ready/completed` 暂时都收起成 `✓`（completion gate 落地后再只保留 `completed`）
+- [x] `ready/completed` 的 `✓` 当前可点击本地消失（待 `Run` tab 落地后再升级成“打开并消失”）
 - [ ] 点击 `✓` 后打开 `Run` tab 并消失
 - [ ] 为新文案增加 i18n key
 

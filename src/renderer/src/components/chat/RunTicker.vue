@@ -1,34 +1,35 @@
 <template>
   <div class="flex justify-center px-4">
-    <div
+    <button
       v-if="isCollapsed"
-      class="run-ticker-island relative flex size-11 items-center justify-center overflow-hidden rounded-full border shadow-sm backdrop-blur-xl transition-all duration-300 ease-out supports-[backdrop-filter]:bg-background/45"
+      type="button"
+      class="run-ticker-island flex size-9 items-center justify-center rounded-full border shadow-[0_12px_28px_-18px_rgba(15,23,42,0.6)] backdrop-blur-xl transition-all duration-200 ease-out supports-[backdrop-filter]:bg-background/45"
       :class="collapsedShellClass"
       :data-run-ticker="'compact'"
       :data-run-status="props.snapshot.status"
+      :aria-label="compactButtonLabel"
+      @click="emit('acknowledge')"
     >
-      <div class="pointer-events-none absolute inset-x-2 top-0 h-px bg-white/45 opacity-80" />
-      <span class="text-base font-semibold leading-none" :class="collapsedGlyphClass">✓</span>
-    </div>
+      <span class="text-sm font-semibold leading-none" :class="collapsedGlyphClass">✓</span>
+    </button>
     <div
       v-else
-      class="run-ticker-island relative w-full max-w-[38rem] overflow-hidden rounded-[26px] border px-3.5 py-2.5 shadow-[0_18px_56px_-28px_rgba(15,23,42,0.55)] backdrop-blur-xl transition-all duration-300 ease-out supports-[backdrop-filter]:bg-background/45"
+      class="run-ticker-island w-full max-w-[32rem] overflow-hidden rounded-[22px] border px-3 py-1.5 shadow-[0_18px_40px_-24px_rgba(15,23,42,0.58)] backdrop-blur-xl transition-all duration-200 ease-out supports-[backdrop-filter]:bg-background/45"
       :class="activeShellClass"
       :data-run-ticker="'active'"
       :data-run-status="props.snapshot.status"
     >
-      <div class="pointer-events-none absolute inset-x-6 top-0 h-px bg-white/45 opacity-80" />
-      <div class="flex min-w-0 items-center gap-3">
+      <div class="flex min-w-0 items-center gap-2.5">
         <div
-          class="flex size-8 shrink-0 items-center justify-center rounded-full border shadow-inner"
+          class="flex size-7 shrink-0 items-center justify-center rounded-full border shadow-inner"
           :class="orbClass"
         >
-          <span class="size-2 rounded-full" :class="[dotClass, pulseClass]" />
+          <span class="size-1.5 rounded-full" :class="[dotClass, pulseClass]" />
         </div>
         <div class="min-w-0 flex-1">
-          <p class="truncate text-sm font-medium text-foreground/95">
+          <p class="truncate text-[13px] font-medium text-foreground/95">
             <span
-              class="mr-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground/75"
+              class="mr-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/70"
             >
               {{ statusLabel }}
             </span>
@@ -36,7 +37,7 @@
           </p>
         </div>
         <div
-          class="shrink-0 rounded-full border border-border/60 bg-background/60 px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.18em] text-muted-foreground/80"
+          class="shrink-0 rounded-full border border-border/55 bg-background/55 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground/75"
         >
           {{ stageLabel }}
         </div>
@@ -51,6 +52,10 @@ import type { RunSnapshot, RunStage, RunStatus } from '@shared/types/agent-inter
 
 const props = defineProps<{
   snapshot: RunSnapshot
+}>()
+
+const emit = defineEmits<{
+  acknowledge: []
 }>()
 
 const summaryText = computed(
@@ -179,4 +184,5 @@ const stageToLabel = (stage: RunStage) => formatLabel(stage)
 
 const statusLabel = computed(() => statusToLabel(props.snapshot.status))
 const stageLabel = computed(() => stageToLabel(props.snapshot.stage))
+const compactButtonLabel = computed(() => `Dismiss ${statusLabel.value} run ticker`)
 </script>

@@ -39,6 +39,21 @@ describe('RunTicker', () => {
     expect(wrapper.text()).toContain('✓')
   })
 
+  it('emits acknowledge when the compact check island is clicked', async () => {
+    const wrapper = mount(RunTicker, {
+      props: {
+        snapshot: createSnapshot({
+          status: 'ready',
+          stage: 'verify'
+        })
+      }
+    })
+
+    await wrapper.get('button[data-run-ticker="compact"]').trigger('click')
+
+    expect(wrapper.emitted('acknowledge')).toEqual([[]])
+  })
+
   it('uses blocker summary and keeps the expanded island for waiting states', () => {
     const wrapper = mount(RunTicker, {
       props: {

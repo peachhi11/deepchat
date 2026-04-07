@@ -12,13 +12,17 @@
         :project="sessionProject"
         :is-read-only="isReadOnlySession"
       />
-      <div v-if="runSnapshot" class="pointer-events-none sticky top-2 z-20 px-4 pb-3">
-        <RunTicker class="chat-capture-hide pointer-events-auto" :snapshot="runSnapshot" />
+      <div v-if="visibleRunSnapshot" class="pointer-events-none sticky top-2 z-20 px-4 pb-3">
+        <RunTicker
+          class="chat-capture-hide pointer-events-auto"
+          :snapshot="visibleRunSnapshot"
+          @acknowledge="onRunTickerAcknowledge"
+        />
       </div>
       <div
         v-if="isChatSearchOpen"
         class="pointer-events-none sticky z-10 px-6"
-        :class="runSnapshot ? 'top-16' : 'top-14'"
+        :class="visibleRunSnapshot ? 'top-14' : 'top-12'"
       >
         <div class="mx-auto flex w-full max-w-5xl justify-end">
           <ChatSearchBar
@@ -171,6 +175,7 @@ const isGenerating = computed(
   () => sessionStore.activeSession?.status === 'working' || messageStore.isStreaming
 )
 const runSnapshot = ref<RunSnapshot | null>(null)
+const dismissedCompactSnapshotKey = ref<string | null>(null)
 const RATE_LIMIT_STREAM_MESSAGE_PREFIX = '__rate_limit__:'
 const isAcpWorkdirMissing = computed(() => {
   const activeSession = sessionStore.activeSession
@@ -199,6 +204,35 @@ const chatSearchBarRef = ref<{
   selectInput: () => void
 } | null>(null)
 let spotlightJumpTimer: number | null = null
+
+const isCompactRunSnapshot = (snapshot: RunSnapshot | null): snapshot is RunSnapshot =>
+  snapshot !== null && (snapshot.status === 'ready' || snapshot.status === 'completed')
+
+const getCompactSnapshotKey = (snapshot: RunSnapshot | null): string | null => {
+  if (!isCompactRunSnapshot(snapshot)) {
+    return null
+  }
+
+  return `${snapshot.runId}:${snapshot.status}:${snapshot.updatedAt}`
+}
+
+const visibleRunSnapshot = computed(() => {
+  const snapshot = runSnapshot.value
+  if (!snapshot) {
+    return null
+  }
+
+  if (snapshot.completionAcknowledged) {
+    return null
+  }
+
+  const compactKey = getCompactSnapshotKey(snapshot)
+  if (compactKey && compactKey === dismissedCompactSnapshotKey.value) {
+    return null
+  }
+
+  return snapshot
+})
 
 function scrollToBottom() {
   const el = scrollContainer.value
@@ -260,6 +294,7 @@ watch(
   () => props.sessionId,
   async (id) => {
     clearChatSearchState()
+    dismissedCompactSnapshotKey.value = null
     if (id) {
       await Promise.all([
         messageStore.loadMessages(id),
@@ -275,6 +310,7 @@ watch(
       return
     }
     runSnapshot.value = null
+    dismissedCompactSnapshotKey.value = null
     pendingInputStore.clear()
   },
   { immediate: true }
@@ -294,6 +330,10 @@ watch(
 
 async function loadRunSnapshot(sessionId: string): Promise<void> {
   runSnapshot.value = await agentSessionPresenter.getActiveRunSnapshot(sessionId)
+}
+
+function onRunTickerAcknowledge() {
+  dismissedCompactSnapshotKey.value = getCompactSnapshotKey(runSnapshot.value)
 }
 
 function parseUserMessageContent(record: ChatMessageRecord): DisplayUserMessageContent {

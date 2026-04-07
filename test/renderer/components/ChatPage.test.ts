@@ -388,6 +388,28 @@ describe('ChatPage', () => {
     expect(wrapper.find('[data-run-status="ready"]').exists()).toBe(true)
   })
 
+  it('dismisses the compact run ticker after clicking the check island', async () => {
+    const { wrapper } = await setup({
+      initialRunSnapshot: {
+        runId: 'run-1',
+        sessionId: 's1',
+        title: 'Implement run ticker',
+        goal: 'Implement run ticker',
+        status: 'ready',
+        stage: 'verify',
+        progressDone: 0,
+        progressTotal: 0,
+        tickerSummary: 'Implement run ticker',
+        completionAcknowledged: false,
+        updatedAt: 1
+      }
+    })
+
+    await wrapper.get('button[data-run-ticker="compact"]').trigger('click')
+
+    expect(wrapper.find('[data-run-ticker="compact"]').exists()).toBe(false)
+  })
+
   it('updates the run ticker when a run snapshot IPC event arrives', async () => {
     const { wrapper, emitIpc, SESSION_EVENTS } = await setup()
 
