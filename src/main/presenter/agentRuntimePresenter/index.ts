@@ -54,6 +54,8 @@ import {
 } from './contextBuilder'
 import { appendSummarySection, CompactionService, type CompactionIntent } from './compactionService'
 import { buildRunHandoffMarkdown } from './handoffBuilder'
+import { DeepChatMemoryManager } from './memoryManager'
+import { DeepChatMemoryStore } from './memoryStore'
 import { buildPersistableMessageTracePayload } from './messageTracePayload'
 import { buildTerminalErrorBlocks, DeepChatMessageStore } from './messageStore'
 import { PendingInputCoordinator } from './pendingInputCoordinator'
@@ -162,6 +164,8 @@ export class AgentRuntimePresenter implements IAgentImplementation {
   private readonly runStore: DeepChatRunStore
   private readonly runStepStore: DeepChatRunStepStore
   private readonly runCheckpointStore: DeepChatRunCheckpointStore
+  private readonly memoryStore: DeepChatMemoryStore
+  private readonly memoryManager: DeepChatMemoryManager
   private readonly runStateManager: RunStateManager
   private readonly runSnapshotBuilder: RunSnapshotBuilder
   private readonly runtimeState: Map<string, DeepChatSessionState> = new Map()
@@ -213,6 +217,8 @@ export class AgentRuntimePresenter implements IAgentImplementation {
     this.runStore = new DeepChatRunStore(sqlitePresenter)
     this.runStepStore = new DeepChatRunStepStore(sqlitePresenter)
     this.runCheckpointStore = new DeepChatRunCheckpointStore(sqlitePresenter)
+    this.memoryStore = new DeepChatMemoryStore(sqlitePresenter)
+    this.memoryManager = new DeepChatMemoryManager(this.memoryStore)
     this.runStateManager = new RunStateManager(this.runStore)
     this.runSnapshotBuilder = new RunSnapshotBuilder({
       runStepStore: this.runStepStore,
@@ -313,6 +319,7 @@ export class AgentRuntimePresenter implements IAgentImplementation {
     this.runStateManager.clearSession(sessionId)
     this.runStepStore.deleteBySession(sessionId)
     this.runCheckpointStore.deleteBySession(sessionId)
+    this.memoryStore.deleteBySession(sessionId)
     this.messageStore.deleteBySession(sessionId)
     this.sessionStore.delete(sessionId)
     this.runtimeState.delete(sessionId)
@@ -4431,6 +4438,11 @@ export class AgentRuntimePresenter implements IAgentImplementation {
     const effectClass = params.effectClass ?? 'other'
     const toolCallStepStatus = params.isError ? 'failed' : 'completed'
     const toolCallStepId = this.buildDeterministicRunStepId(runId, 'tool_call', params.toolCallId)
+    const toolResultStepId = this.buildDeterministicRunStepId(
+      runId,
+      'tool_result',
+      params.toolCallId
+    )
     const existingToolCallStep = this.runStepStore.get(toolCallStepId)
 
     if (existingToolCallStep) {
@@ -4442,7 +4454,7 @@ export class AgentRuntimePresenter implements IAgentImplementation {
     }
 
     this.upsertRunStep({
-      id: this.buildDeterministicRunStepId(runId, 'tool_result', params.toolCallId),
+      id: toolResultStepId,
       runId,
       sessionId: params.sessionId,
       messageId: params.messageId,
@@ -4467,6 +4479,17 @@ export class AgentRuntimePresenter implements IAgentImplementation {
       updatedAt: now,
       completedAt: now
     })
+
+    if (!params.isError && params.evidence === true) {
+      this.memoryManager.recordToolEvidence({
+        sessionId: params.sessionId,
+        runId,
+        sourceStepId: toolResultStepId,
+        toolName: params.toolName,
+        responsePreview: this.truncateStepText(params.responseText, 240),
+        payloadUri: params.offloadPath ?? null
+      })
+    }
   }
 
   private recordFailureStep(
@@ -4482,6 +4505,8 @@ export class AgentRuntimePresenter implements IAgentImplementation {
     const now = Date.now()
     const identity = params.messageId?.trim() || params.source
     const run = this.runStore.get(runId)
+    const failureStepId = this.buildDeterministicRunStepId(runId, 'failure', identity)
+    let checkpointId: string | null = null
 
     if (run) {
       const summaryState = this.sessionStore.getSummaryState(params.sessionId)
@@ -4506,11 +4531,12 @@ export class AgentRuntimePresenter implements IAgentImplementation {
         }),
         createdAt: now
       })
+      checkpointId = checkpoint.id
       this.attachCheckpointToRun(params.sessionId, runId, checkpoint.id)
     }
 
     this.upsertRunStep({
-      id: this.buildDeterministicRunStepId(runId, 'failure', identity),
+      id: failureStepId,
       runId,
       sessionId: params.sessionId,
       messageId: params.messageId ?? null,
@@ -4528,6 +4554,15 @@ export class AgentRuntimePresenter implements IAgentImplementation {
       createdAt: now,
       updatedAt: now,
       completedAt: now
+    })
+
+    this.memoryManager.recordFailureEpisode({
+      sessionId: params.sessionId,
+      runId,
+      sourceStepId: failureStepId,
+      errorMessage: params.errorMessage,
+      stopReason: params.stopReason,
+      checkpointId
     })
   }
 

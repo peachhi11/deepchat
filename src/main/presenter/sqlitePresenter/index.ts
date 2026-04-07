@@ -20,6 +20,7 @@ import { DeepChatSessionsTable } from './tables/deepchatSessions'
 import { DeepChatRunsTable } from './tables/deepchatRuns'
 import { DeepChatRunStepsTable } from './tables/deepchatRunSteps'
 import { DeepChatRunCheckpointsTable } from './tables/deepchatRunCheckpoints'
+import { DeepChatMemoryRecordsTable } from './tables/deepchatMemoryRecords'
 import { DeepChatMessagesTable } from './tables/deepchatMessages'
 import { DeepChatMessageTracesTable } from './tables/deepchatMessageTraces'
 import { DeepChatMessageSearchResultsTable } from './tables/deepchatMessageSearchResults'
@@ -49,6 +50,7 @@ export class SQLitePresenter implements ISQLitePresenter {
   public deepchatRunsTable!: DeepChatRunsTable
   public deepchatRunStepsTable!: DeepChatRunStepsTable
   public deepchatRunCheckpointsTable!: DeepChatRunCheckpointsTable
+  public deepchatMemoryRecordsTable!: DeepChatMemoryRecordsTable
   public deepchatMessagesTable!: DeepChatMessagesTable
   public deepchatMessageTracesTable!: DeepChatMessageTracesTable
   public deepchatMessageSearchResultsTable!: DeepChatMessageSearchResultsTable
@@ -177,6 +179,7 @@ export class SQLitePresenter implements ISQLitePresenter {
     this.deepchatRunsTable = new DeepChatRunsTable(this.db)
     this.deepchatRunStepsTable = new DeepChatRunStepsTable(this.db)
     this.deepchatRunCheckpointsTable = new DeepChatRunCheckpointsTable(this.db)
+    this.deepchatMemoryRecordsTable = new DeepChatMemoryRecordsTable(this.db)
     this.deepchatMessagesTable = new DeepChatMessagesTable(this.db)
     this.deepchatMessageTracesTable = new DeepChatMessageTracesTable(this.db)
     this.deepchatMessageSearchResultsTable = new DeepChatMessageSearchResultsTable(this.db)
@@ -194,6 +197,7 @@ export class SQLitePresenter implements ISQLitePresenter {
     this.deepchatRunsTable.createTable()
     this.deepchatRunStepsTable.createTable()
     this.deepchatRunCheckpointsTable.createTable()
+    this.deepchatMemoryRecordsTable.createTable()
     this.deepchatMessagesTable.createTable()
     this.deepchatMessageTracesTable.createTable()
     this.deepchatMessageSearchResultsTable.createTable()
@@ -230,6 +234,7 @@ export class SQLitePresenter implements ISQLitePresenter {
       this.deepchatRunsTable,
       this.deepchatRunStepsTable,
       this.deepchatRunCheckpointsTable,
+      this.deepchatMemoryRecordsTable,
       this.deepchatMessagesTable,
       this.deepchatMessageTracesTable,
       this.deepchatMessageSearchResultsTable,

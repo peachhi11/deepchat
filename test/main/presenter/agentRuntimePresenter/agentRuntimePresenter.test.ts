@@ -93,6 +93,7 @@ function createMockSqlitePresenter() {
   const runsStore = new Map<string, any>()
   const runStepsStore = new Map<string, any>()
   const checkpointsStore = new Map<string, any>()
+  const memoryStore = new Map<string, any>()
   return {
     newSessionsTable: {
       get: vi.fn(),
@@ -280,6 +281,45 @@ function createMockSqlitePresenter() {
         for (const [id, row] of checkpointsStore.entries()) {
           if (row.session_id === sessionId) {
             checkpointsStore.delete(id)
+          }
+        }
+      })
+    },
+    deepchatMemoryRecordsTable: {
+      insert: vi.fn((row: any) => {
+        memoryStore.set(row.id, {
+          id: row.id,
+          scope: row.scope,
+          run_id: row.runId ?? null,
+          session_id: row.sessionId ?? null,
+          workspace_id: row.workspaceId ?? null,
+          task_id: row.taskId ?? null,
+          source_step_id: row.sourceStepId ?? null,
+          kind: row.kind,
+          summary: row.summary,
+          payload_uri: row.payloadUri ?? null,
+          evidence_refs_json: JSON.stringify(row.evidenceRefs ?? []),
+          confidence: row.confidence,
+          freshness: row.freshness,
+          supersedes_json: JSON.stringify(row.supersedes ?? []),
+          created_at: row.createdAt ?? Date.now(),
+          expires_at: row.expiresAt ?? null
+        })
+      }),
+      get: vi.fn((id: string) => memoryStore.get(id)),
+      listBySession: vi.fn((sessionId: string, options?: { scopes?: string[]; limit?: number }) => {
+        let rows = Array.from(memoryStore.values())
+          .filter((row) => row.session_id === sessionId)
+          .sort((left, right) => right.created_at - left.created_at)
+        if (options?.scopes?.length) {
+          rows = rows.filter((row) => options.scopes?.includes(row.scope))
+        }
+        return typeof options?.limit === 'number' ? rows.slice(0, options.limit) : rows
+      }),
+      deleteBySession: vi.fn((sessionId: string) => {
+        for (const [id, row] of memoryStore.entries()) {
+          if (row.session_id === sessionId) {
+            memoryStore.delete(id)
           }
         }
       })
@@ -786,6 +826,13 @@ describe('AgentRuntimePresenter', () => {
         toolName: 'read',
         responsePreview: 'README content'
       })
+      expect(sqlitePresenter.deepchatMemoryRecordsTable.insert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          scope: 'evidence',
+          kind: 'artifact',
+          sourceStepId: expect.stringContaining(':tool_result:tool-1')
+        })
+      )
     })
 
     it('persists failure steps when the run ends with an error', async () => {
@@ -810,6 +857,13 @@ describe('AgentRuntimePresenter', () => {
         expect.objectContaining({
           checkpointType: 'failure',
           label: 'Failure checkpoint'
+        })
+      )
+      expect(sqlitePresenter.deepchatMemoryRecordsTable.insert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          scope: 'episodic',
+          kind: 'failure',
+          sourceStepId: expect.stringContaining(':failure:process_result')
         })
       )
     })

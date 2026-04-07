@@ -33,7 +33,8 @@
 - [ ] 新增 `TaskNode`
 - [x] 新增 `StepRecord`
 - [x] 新增 `RunCheckpoint`
-- [ ] 新增 `MemoryScope`、`MemoryRecord`、`RunTraceEvent`
+- [ ] 新增 `RunTraceEvent`
+- [x] 新增 `MemoryScope`、`MemoryRecord`
 - [x] 新增 `RunSnapshot`
 - [x] 新增 `deepchat_runs` table
 - [ ] 新增 `deepchat_run_tasks` table
@@ -78,9 +79,9 @@
 
 ## T5 Memory Fabric
 
-- [ ] 新增 `deepchat_memory_records` table
-- [ ] 新增 `MemoryStore`
-- [ ] 新增 `MemoryManager`
+- [x] 新增 `deepchat_memory_records` table
+- [x] 新增 `MemoryStore`
+- [x] 新增 `MemoryManager`
 - [ ] 新增 `retrievalPlanner`
 - [ ] 实现 `working` / `episodic` / `evidence` 首轮写入策略
 - [ ] 实现 `confidence` / `freshness` / `supersedes` 字段约束

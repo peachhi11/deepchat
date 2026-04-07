@@ -57,6 +57,10 @@ export type RunCheckpointType =
   | 'failure'
   | 'completion'
 
+export type MemoryScope = 'working' | 'episodic' | 'semantic' | 'procedural' | 'evidence'
+export type MemoryKind = 'fact' | 'decision' | 'constraint' | 'failure' | 'preference' | 'artifact'
+export type MemoryFreshness = 'volatile' | 'stable'
+
 export interface HarnessRun {
   id: string
   sessionId: string
@@ -100,6 +104,25 @@ export interface RunCheckpoint {
   label: string
   payloadJson?: string | null
   createdAt: number
+}
+
+export interface MemoryRecord {
+  id: string
+  scope: MemoryScope
+  runId?: string | null
+  sessionId?: string | null
+  workspaceId?: string | null
+  taskId?: string | null
+  sourceStepId?: string | null
+  kind: MemoryKind
+  summary: string
+  payloadUri?: string | null
+  evidenceRefs: string[]
+  confidence: number
+  freshness: MemoryFreshness
+  supersedes: string[]
+  createdAt: number
+  expiresAt?: number | null
 }
 
 export interface RunSnapshot {

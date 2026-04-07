@@ -11,6 +11,7 @@
 | Step 3: Permission Wait Backbone | 已完成 | 已补 `deepchat_run_steps`、`deepchat_run_checkpoints`、permission wait checkpoint / step / decision durable truth，并把 grant / deny / resume 接回 run snapshot。 |
 | Step 4: Structured Step Log | 已完成 | 已补 `tool_call` / `tool_result` / `failure` / `aborted` durable step log，`MAX_TOOL_CALLS` 现在会明确失败，不再伪装成完成。 |
 | Step 5: Checkpoint + Handoff on Compaction | 已完成 | 已补 `before_compaction` / `before_reset` / `failure` checkpoint producer，且 compaction、retry reset、resume recovery 都已开始消费 handoff。 |
+| Step 6: Memory Baseline | 进行中 | 已补 `MemoryScope` / `MemoryRecord`、`deepchat_memory_records` durable schema、`MemoryStore` / `MemoryManager`，并接上 evidence / episodic 两条最小写入链。 |
 
 ## Step 1 交付
 
@@ -152,6 +153,24 @@
   - 它与 Step 7 的 completion gate 强绑定
   - 提前落地只会制造“ready 冒充 completed”的伪真相
 
+## Step 6 当前进展
+
+- 新增 shared contracts：
+  - `MemoryScope`
+  - `MemoryRecord`
+- 新增 SQLite 表：
+  - `deepchat_memory_records`
+- 新增 main store / manager：
+  - `src/main/presenter/agentRuntimePresenter/memoryStore.ts`
+  - `src/main/presenter/agentRuntimePresenter/memoryManager.ts`
+- 当前已经接上的最小 producer：
+  - 成功的只读验证型 `tool_result` 会写 `evidence` memory
+  - run `failure` 会写 `episodic` failure memory
+- 当前刻意还没做的部分：
+  - `working` retrieval / prompt 组装
+  - `semantic` / `procedural` memory gate
+  - handoff builder 读取 recent memory
+
 ## 验证记录
 
 - `pnpm exec vitest --run test/main/presenter/agentRuntimePresenter/runStore.test.ts test/main/presenter/sqlitePresenter.test.ts test/main/presenter/agentRuntimePresenter/agentRuntimePresenter.test.ts test/main/presenter/remoteControlPresenter/remoteConversationRunner.test.ts`
@@ -187,6 +206,9 @@
 - `pnpm exec vitest --run test/main/presenter/agentRuntimePresenter/agentRuntimePresenter.test.ts`
   - 结果：`1 passed`
   - 说明：Step 5 收尾后，`before_reset` checkpoint、compaction handoff 注入、retry reset handoff 注入都已通过 main 定向测试
+- `pnpm exec vitest --run test/main/presenter/agentRuntimePresenter/memoryStore.test.ts test/main/presenter/agentRuntimePresenter/agentRuntimePresenter.test.ts test/main/presenter/sqlitePresenter.test.ts`
+  - 结果：`2 passed | 1 skipped`
+  - 说明：Step 6 第一刀的 memory store、evidence/episodic producer 已通过 main 定向测试；`sqlitePresenter.test.ts` 仍因当前环境 sqlite native 依赖不可用被整组跳过
 - `pnpm run format`
   - 结果：通过
 - `pnpm run i18n`
@@ -201,6 +223,6 @@
 
 继续 Step 6
 
-- 开始 `Memory Fabric` 最小闭环
-- 优先落 `deepchat_memory_records`、`MemoryStore`、`MemoryManager`
-- 让 working set 开始摆脱“只靠 transcript replay”
+- 补 `retrievalPlanner`
+- 先做最小 `working` set 组装
+- 再决定先把 memory 接进 handoff builder 还是直接接进 prompt builder

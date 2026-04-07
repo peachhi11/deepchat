@@ -863,6 +863,11 @@ describeIfSqlite('SQLitePresenter legacy schema bootstrap', () => {
       .all() as Array<{
       name: string
     }>
+    const memoryColumns = checkDb
+      .prepare('PRAGMA table_info(deepchat_memory_records)')
+      .all() as Array<{
+      name: string
+    }>
     const versions = checkDb
       .prepare('SELECT version FROM schema_versions ORDER BY version ASC')
       .all() as Array<{ version: number }>
@@ -894,7 +899,27 @@ describeIfSqlite('SQLitePresenter legacy schema bootstrap', () => {
         'created_at'
       ])
     )
-    expect(versions.map((entry) => entry.version)).toEqual(expect.arrayContaining([24, 25]))
+    expect(new Set(memoryColumns.map((column) => column.name))).toEqual(
+      new Set([
+        'id',
+        'scope',
+        'run_id',
+        'session_id',
+        'workspace_id',
+        'task_id',
+        'source_step_id',
+        'kind',
+        'summary',
+        'payload_uri',
+        'evidence_refs_json',
+        'confidence',
+        'freshness',
+        'supersedes_json',
+        'created_at',
+        'expires_at'
+      ])
+    )
+    expect(versions.map((entry) => entry.version)).toEqual(expect.arrayContaining([24, 25, 26]))
     checkDb.close()
   })
 
@@ -954,6 +979,49 @@ describeIfSqlite('SQLitePresenter legacy schema bootstrap', () => {
 
     expect(presenter.deepchatRunStepsTable.get('step-1')).toBeUndefined()
     expect(presenter.deepchatRunCheckpointsTable.get('cp-1')).toBeUndefined()
+    presenter.close()
+  })
+
+  it('supports deepchat_memory_records CRUD through sqlite helpers', async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'deepchat-sqlite-presenter-'))
+    tempDirs.push(tempDir)
+
+    const dbPath = path.join(tempDir, 'agent.db')
+    const presenter = new SQLitePresenterCtor(dbPath)
+
+    presenter.deepchatMemoryRecordsTable.insert({
+      id: 'memory-1',
+      scope: 'evidence',
+      runId: 'run-1',
+      sessionId: 'session-1',
+      sourceStepId: 'step-1',
+      kind: 'artifact',
+      summary: 'read produced evidence',
+      payloadUri: '/tmp/evidence.txt',
+      evidenceRefs: ['run-step:step-1'],
+      confidence: 0.92,
+      freshness: 'volatile',
+      supersedes: [],
+      createdAt: 100
+    })
+
+    expect(presenter.deepchatMemoryRecordsTable.get('memory-1')).toMatchObject({
+      id: 'memory-1',
+      scope: 'evidence',
+      run_id: 'run-1',
+      session_id: 'session-1',
+      source_step_id: 'step-1'
+    })
+    expect(
+      presenter.deepchatMemoryRecordsTable.listBySession('session-1', {
+        scopes: ['evidence'],
+        limit: 5
+      })
+    ).toHaveLength(1)
+
+    presenter.deepchatMemoryRecordsTable.deleteBySession('session-1')
+
+    expect(presenter.deepchatMemoryRecordsTable.get('memory-1')).toBeUndefined()
     presenter.close()
   })
 })
