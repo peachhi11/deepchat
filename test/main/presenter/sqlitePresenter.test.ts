@@ -737,4 +737,112 @@ describeIfSqlite('SQLitePresenter legacy schema bootstrap', () => {
     expect(versions.map((entry) => entry.version)).toContain(22)
     checkDb.close()
   })
+
+  it('creates deepchat_runs when schema version is already 22', async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'deepchat-sqlite-presenter-'))
+    tempDirs.push(tempDir)
+
+    const dbPath = path.join(tempDir, 'agent.db')
+    const bootstrapDb = new DatabaseCtor(dbPath)
+    bootstrapDb.exec(`
+      CREATE TABLE IF NOT EXISTS schema_versions (
+        version INTEGER PRIMARY KEY,
+        applied_at INTEGER NOT NULL
+      );
+      INSERT INTO schema_versions (version, applied_at) VALUES (22, ${Date.now()});
+    `)
+    bootstrapDb.close()
+
+    const presenter = new SQLitePresenterCtor(dbPath)
+    presenter.close()
+
+    const checkDb = new DatabaseCtor(dbPath)
+    const runColumns = checkDb.prepare('PRAGMA table_info(deepchat_runs)').all() as Array<{
+      name: string
+    }>
+    const columnNames = new Set(runColumns.map((column) => column.name))
+    const versions = checkDb
+      .prepare('SELECT version FROM schema_versions ORDER BY version ASC')
+      .all() as Array<{ version: number }>
+
+    expect(columnNames).toEqual(
+      new Set([
+        'id',
+        'session_id',
+        'parent_run_id',
+        'origin_checkpoint_id',
+        'title',
+        'goal',
+        'status',
+        'stage',
+        'current_task_id',
+        'current_step_id',
+        'active_checkpoint_id',
+        'environment_id',
+        'trigger_message_id',
+        'started_at',
+        'completed_at',
+        'created_at',
+        'updated_at'
+      ])
+    )
+    expect(versions.map((entry) => entry.version)).toContain(23)
+    checkDb.close()
+  })
+
+  it('supports deepchat_runs CRUD through the sqlite table helper', async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'deepchat-sqlite-presenter-'))
+    tempDirs.push(tempDir)
+
+    const dbPath = path.join(tempDir, 'agent.db')
+    const presenter = new SQLitePresenterCtor(dbPath)
+
+    presenter.deepchatRunsTable.insert({
+      id: 'run-1',
+      sessionId: 'session-1',
+      title: 'Implement Step 1',
+      goal: 'Add minimal run truth',
+      status: 'planning',
+      stage: 'plan',
+      triggerMessageId: 'message-1',
+      createdAt: 100,
+      updatedAt: 100
+    })
+    presenter.deepchatRunsTable.insert({
+      id: 'run-2',
+      sessionId: 'session-1',
+      title: 'Implement Step 2',
+      goal: 'Connect active run lifecycle',
+      status: 'draft',
+      stage: 'intent',
+      createdAt: 200,
+      updatedAt: 200
+    })
+
+    presenter.deepchatRunsTable.update('run-1', {
+      status: 'executing',
+      stage: 'task',
+      current_step_id: 'step-1',
+      updated_at: 300
+    })
+
+    expect(presenter.deepchatRunsTable.get('run-1')).toMatchObject({
+      id: 'run-1',
+      session_id: 'session-1',
+      title: 'Implement Step 1',
+      status: 'executing',
+      stage: 'task',
+      current_step_id: 'step-1',
+      updated_at: 300
+    })
+    expect(presenter.deepchatRunsTable.getLatestBySession('session-1')?.id).toBe('run-1')
+    expect(presenter.deepchatRunsTable.listBySession('session-1').map((row) => row.id)).toEqual([
+      'run-1',
+      'run-2'
+    ])
+
+    presenter.deepchatRunsTable.deleteBySession('session-1')
+    expect(presenter.deepchatRunsTable.listBySession('session-1')).toEqual([])
+    presenter.close()
+  })
 })

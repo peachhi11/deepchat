@@ -2210,7 +2210,7 @@ describe('AgentRuntimePresenter', () => {
       await agent.initSession('s1', { providerId: 'openai', modelId: 'gpt-4' })
       const cancelSpy = vi.spyOn(agent, 'cancelGeneration').mockResolvedValue(undefined)
       ;(agent as any).activeGenerations.set('s1', {
-        runId: 'run-1',
+        generationId: 'gen-1',
         messageId: 'msg-active',
         abortController: new AbortController()
       })

@@ -81,7 +81,7 @@ describe('RemoteConversationRunner', () => {
     const agentRuntimePresenter = {
       getActiveGeneration: vi.fn().mockReturnValue({
         eventId: 'msg-1',
-        runId: 'run-1'
+        generationId: 'gen-1'
       })
     }
     const runner = new RemoteConversationRunner(
@@ -366,7 +366,7 @@ describe('RemoteConversationRunner', () => {
         .fn()
         .mockReturnValueOnce({
           eventId: 'msg-old',
-          runId: 'run-old'
+          generationId: 'gen-old'
         })
         .mockReturnValue(null)
     }
@@ -528,7 +528,7 @@ describe('RemoteConversationRunner', () => {
         agentRuntimePresenter: {
           getActiveGeneration: vi.fn().mockReturnValue({
             eventId: 'assistant-1',
-            runId: 'run-1'
+            generationId: 'gen-1'
           })
         } as any,
         windowPresenter: {} as any,

@@ -17,6 +17,7 @@ import { NewEnvironmentsTable } from './tables/newEnvironments'
 import { NewSessionsTable } from './tables/newSessions'
 import { NewProjectsTable } from './tables/newProjects'
 import { DeepChatSessionsTable } from './tables/deepchatSessions'
+import { DeepChatRunsTable } from './tables/deepchatRuns'
 import { DeepChatMessagesTable } from './tables/deepchatMessages'
 import { DeepChatMessageTracesTable } from './tables/deepchatMessageTraces'
 import { DeepChatMessageSearchResultsTable } from './tables/deepchatMessageSearchResults'
@@ -43,6 +44,7 @@ export class SQLitePresenter implements ISQLitePresenter {
   public newSessionsTable!: NewSessionsTable
   public newProjectsTable!: NewProjectsTable
   public deepchatSessionsTable!: DeepChatSessionsTable
+  public deepchatRunsTable!: DeepChatRunsTable
   public deepchatMessagesTable!: DeepChatMessagesTable
   public deepchatMessageTracesTable!: DeepChatMessageTracesTable
   public deepchatMessageSearchResultsTable!: DeepChatMessageSearchResultsTable
@@ -168,6 +170,7 @@ export class SQLitePresenter implements ISQLitePresenter {
     this.newSessionsTable = new NewSessionsTable(this.db)
     this.newProjectsTable = new NewProjectsTable(this.db)
     this.deepchatSessionsTable = new DeepChatSessionsTable(this.db)
+    this.deepchatRunsTable = new DeepChatRunsTable(this.db)
     this.deepchatMessagesTable = new DeepChatMessagesTable(this.db)
     this.deepchatMessageTracesTable = new DeepChatMessageTracesTable(this.db)
     this.deepchatMessageSearchResultsTable = new DeepChatMessageSearchResultsTable(this.db)
@@ -182,6 +185,7 @@ export class SQLitePresenter implements ISQLitePresenter {
     this.newSessionsTable.createTable()
     this.newProjectsTable.createTable()
     this.deepchatSessionsTable.createTable()
+    this.deepchatRunsTable.createTable()
     this.deepchatMessagesTable.createTable()
     this.deepchatMessageTracesTable.createTable()
     this.deepchatMessageSearchResultsTable.createTable()
@@ -215,6 +219,7 @@ export class SQLitePresenter implements ISQLitePresenter {
       this.newSessionsTable,
       this.newProjectsTable,
       this.deepchatSessionsTable,
+      this.deepchatRunsTable,
       this.deepchatMessagesTable,
       this.deepchatMessageTracesTable,
       this.deepchatMessageSearchResultsTable,
@@ -307,6 +312,7 @@ export class SQLitePresenter implements ISQLitePresenter {
         DELETE FROM deepchat_message_search_results;
         DELETE FROM deepchat_message_traces;
         DELETE FROM deepchat_messages;
+        DELETE FROM deepchat_runs;
         DELETE FROM deepchat_usage_stats;
         DELETE FROM deepchat_sessions;
         DELETE FROM new_environments;

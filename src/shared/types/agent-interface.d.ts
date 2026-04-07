@@ -33,6 +33,60 @@ export interface DeepChatSessionState {
   permissionMode: PermissionMode
 }
 
+export type RunStatus =
+  | 'draft'
+  | 'planning'
+  | 'ready'
+  | 'executing'
+  | 'waiting_permission'
+  | 'waiting_external'
+  | 'evaluating'
+  | 'recovering'
+  | 'completed'
+  | 'failed'
+  | 'aborted'
+
+export type RunStage = 'intent' | 'plan' | 'task' | 'verify' | 'handoff'
+
+export interface HarnessRun {
+  id: string
+  sessionId: string
+  parentRunId?: string | null
+  originCheckpointId?: string | null
+  title: string
+  goal: string
+  status: RunStatus
+  stage: RunStage
+  currentTaskId?: string | null
+  currentStepId?: string | null
+  activeCheckpointId?: string | null
+  environmentId?: string | null
+  triggerMessageId?: string | null
+  createdAt: number
+  updatedAt: number
+  startedAt?: number | null
+  completedAt?: number | null
+}
+
+export interface RunSnapshot {
+  runId: string
+  sessionId: string
+  title: string
+  goal: string
+  status: RunStatus
+  stage: RunStage
+  progressDone: number
+  progressTotal: number
+  currentTaskId?: string | null
+  currentTaskTitle?: string | null
+  activeCheckpointId?: string | null
+  activeCheckpointLabel?: string | null
+  blockerSummary?: string | null
+  tickerSummary: string
+  completionAcknowledged: boolean
+  updatedAt: number
+}
+
 export type PendingInputEnqueueSource = 'send' | 'queue'
 
 export interface QueuePendingInputOptions {

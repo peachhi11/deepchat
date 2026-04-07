@@ -603,7 +603,7 @@ export class RemoteConversationRunner {
       preferredMessageId: string | null
       ignoreMessageId: string | null
     },
-    activeGeneration: { eventId: string; runId: string } | null
+    activeGeneration: { eventId: string; generationId: string } | null
   ): Promise<ChatMessageRecord | null> {
     const candidateIds = [activeGeneration?.eventId ?? null, tracking.preferredMessageId]
     for (const messageId of candidateIds) {

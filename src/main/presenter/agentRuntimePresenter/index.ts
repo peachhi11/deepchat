@@ -111,7 +111,7 @@ type SystemPromptCacheEntry = {
 }
 
 type ActiveGeneration = {
-  runId: string
+  generationId: string
   messageId: string
   abortController: AbortController
 }
@@ -164,7 +164,7 @@ export class AgentRuntimePresenter implements IAgentImplementation {
     ISkillPresenter,
     'getMetadataList' | 'getActiveSkills' | 'loadSkillContent'
   >
-  private nextRunSequence = 0
+  private nextGenerationSequence = 0
 
   constructor(
     llmProviderPresenter: ILlmProviderPresenter,
@@ -542,7 +542,7 @@ export class AgentRuntimePresenter implements IAgentImplementation {
         this.emitMessageRefresh(sessionId, assistantMessageId)
       }
 
-      const { runId, result } = await this.runStreamForMessage({
+      const { generationId, result } = await this.runStreamForMessage({
         sessionId,
         messageId: assistantMessageId,
         messages,
@@ -566,9 +566,9 @@ export class AgentRuntimePresenter implements IAgentImplementation {
         }
       }
       try {
-        this.applyProcessResultStatus(sessionId, result, runId)
+        this.applyProcessResultStatus(sessionId, result, generationId)
       } finally {
-        this.clearActiveGeneration(sessionId, runId)
+        this.clearActiveGeneration(sessionId, generationId)
       }
       if (result?.status === 'completed') {
         void this.drainPendingQueueIfPossible(sessionId, 'completed')
@@ -969,7 +969,7 @@ export class AgentRuntimePresenter implements IAgentImplementation {
     const activeGeneration = this.activeGenerations.get(sessionId)
     if (activeGeneration) {
       activeGeneration.abortController.abort()
-      this.clearActiveGeneration(sessionId, activeGeneration.runId)
+      this.clearActiveGeneration(sessionId, activeGeneration.generationId)
 
       const assistantMessage = this.messageStore.getMessage(activeGeneration.messageId)
       if (assistantMessage?.role === 'assistant') {
@@ -997,7 +997,7 @@ export class AgentRuntimePresenter implements IAgentImplementation {
     this.setSessionStatus(sessionId, 'idle')
   }
 
-  getActiveGeneration(sessionId: string): { eventId: string; runId: string } | null {
+  getActiveGeneration(sessionId: string): { eventId: string; generationId: string } | null {
     const activeGeneration = this.activeGenerations.get(sessionId)
     if (!activeGeneration) {
       return null
@@ -1005,7 +1005,7 @@ export class AgentRuntimePresenter implements IAgentImplementation {
 
     return {
       eventId: activeGeneration.messageId,
-      runId: activeGeneration.runId
+      generationId: activeGeneration.generationId
     }
   }
 
@@ -1411,7 +1411,7 @@ export class AgentRuntimePresenter implements IAgentImplementation {
     initialBlocks?: AssistantMessageBlock[]
     promptPreview?: string
     interleavedReasoning?: InterleavedReasoningConfig
-  }): Promise<{ runId: string; result: ProcessResult }> {
+  }): Promise<{ generationId: string; result: ProcessResult }> {
     const {
       sessionId,
       messageId,
@@ -1492,7 +1492,7 @@ export class AgentRuntimePresenter implements IAgentImplementation {
 
     const abortController = new AbortController()
     const activeGeneration = this.registerActiveGeneration(sessionId, messageId, abortController)
-    const rateLimitMessageId = this.buildRateLimitStreamMessageId(activeGeneration.runId)
+    const rateLimitMessageId = this.buildRateLimitStreamMessageId(activeGeneration.generationId)
     const emitRateLimitWaitingMessage = this.emitRateLimitWaitingMessage.bind(this)
     const clearRateLimitWaitingMessage = this.clearRateLimitWaitingMessage.bind(this)
 
@@ -1666,11 +1666,11 @@ export class AgentRuntimePresenter implements IAgentImplementation {
         }
       })
       return {
-        runId: activeGeneration.runId,
+        generationId: activeGeneration.generationId,
         result
       }
     } catch (error) {
-      this.clearActiveGeneration(sessionId, activeGeneration.runId)
+      this.clearActiveGeneration(sessionId, activeGeneration.generationId)
       throw error
     }
   }
@@ -1801,7 +1801,7 @@ export class AgentRuntimePresenter implements IAgentImplementation {
     abortController: AbortController
   ): ActiveGeneration {
     const generation: ActiveGeneration = {
-      runId: `${sessionId}:${++this.nextRunSequence}`,
+      generationId: `${sessionId}:${++this.nextGenerationSequence}`,
       messageId,
       abortController
     }
@@ -1810,9 +1810,9 @@ export class AgentRuntimePresenter implements IAgentImplementation {
     return generation
   }
 
-  private clearActiveGeneration(sessionId: string, runId: string): void {
+  private clearActiveGeneration(sessionId: string, generationId: string): void {
     const activeGeneration = this.activeGenerations.get(sessionId)
-    if (!activeGeneration || activeGeneration.runId !== runId) {
+    if (!activeGeneration || activeGeneration.generationId !== generationId) {
       return
     }
     this.activeGenerations.delete(sessionId)
@@ -1821,12 +1821,12 @@ export class AgentRuntimePresenter implements IAgentImplementation {
     }
   }
 
-  private isActiveRun(sessionId: string, runId: string): boolean {
-    return this.activeGenerations.get(sessionId)?.runId === runId
+  private isActiveGeneration(sessionId: string, generationId: string): boolean {
+    return this.activeGenerations.get(sessionId)?.generationId === generationId
   }
 
-  private buildRateLimitStreamMessageId(runId: string): string {
-    return `${RATE_LIMIT_STREAM_MESSAGE_PREFIX}${runId}`
+  private buildRateLimitStreamMessageId(generationId: string): string {
+    return `${RATE_LIMIT_STREAM_MESSAGE_PREFIX}${generationId}`
   }
 
   private emitRateLimitWaitingMessage(
@@ -1869,9 +1869,9 @@ export class AgentRuntimePresenter implements IAgentImplementation {
   private applyProcessResultStatus(
     sessionId: string,
     result: ProcessResult | null | undefined,
-    runId?: string
+    generationId?: string
   ): void {
-    if (runId && !this.isActiveRun(sessionId, runId)) {
+    if (generationId && !this.isActiveGeneration(sessionId, generationId)) {
       return
     }
     const state = this.runtimeState.get(sessionId)
@@ -2002,7 +2002,7 @@ export class AgentRuntimePresenter implements IAgentImplementation {
       }
 
       this.throwIfAbortRequested(preStreamAbortSignal)
-      const { runId, result } = await this.runStreamForMessage({
+      const { generationId, result } = await this.runStreamForMessage({
         sessionId,
         messageId,
         messages: resumeContext,
@@ -2012,9 +2012,9 @@ export class AgentRuntimePresenter implements IAgentImplementation {
         interleavedReasoning
       })
       try {
-        this.applyProcessResultStatus(sessionId, result, runId)
+        this.applyProcessResultStatus(sessionId, result, generationId)
       } finally {
-        this.clearActiveGeneration(sessionId, runId)
+        this.clearActiveGeneration(sessionId, generationId)
       }
       if (result?.status === 'completed') {
         void this.drainPendingQueueIfPossible(sessionId, 'completed')

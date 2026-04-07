@@ -1,5 +1,19 @@
 # Stateful Agent Runtime / Harness Redesign 任务清单
 
+> 当前实施状态与验证记录见 [`progress.md`](./progress.md)。
+
+## 实施步进追踪
+
+- [x] Step 1: Minimal Run Truth
+- [ ] Step 2: Active Run Lifecycle
+- [ ] Step 3: Permission Wait Backbone
+- [ ] Step 4: Structured Step Log
+- [ ] Step 5: Checkpoint + Handoff on Compaction
+- [ ] Step 6: Memory Baseline
+- [ ] Step 7: Single-Root Task + Completion Gate
+- [ ] Step 8: Run Ticker
+- [ ] Step 9: Run Tab + Trace + Recovery UI
+
 ## T0 规格文档
 
 - [x] 创建 `docs/specs/stateful-agent-runtime/README.md`
@@ -15,15 +29,17 @@
 
 ## T1 Shared contracts 与数据层骨架
 
-- [ ] 新增 `RunStatus`、`RunStage`、`HarnessRun`、`TaskNode`、`StepRecord`、`RunCheckpoint`
+- [x] 新增 `RunStatus`、`RunStage`、`HarnessRun`
+- [ ] 新增 `TaskNode`、`StepRecord`、`RunCheckpoint`
 - [ ] 新增 `MemoryScope`、`MemoryRecord`、`RunTraceEvent`
-- [ ] 新增 `RunSnapshot` 与 recovery action 共享类型
-- [ ] 新增 `deepchat_runs` table
+- [x] 新增 `RunSnapshot`
+- [x] 新增 `deepchat_runs` table
 - [ ] 新增 `deepchat_run_tasks` table
 - [ ] 新增 `deepchat_run_steps` table
 - [ ] 新增 `deepchat_run_checkpoints` table
 - [ ] 新增 `deepchat_run_artifacts` table
-- [ ] 在 `SQLitePresenter` 中注册新表与迁移版本
+- [x] 新增 `DeepChatRunStore`
+- [x] 在 `SQLitePresenter` 中注册 `deepchat_runs` 表与迁移版本
 
 ## T2 Main State Kernel
 
