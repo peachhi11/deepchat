@@ -22,7 +22,7 @@ import { eventBus } from '@/eventbus'
 import { TAB_EVENTS, CONVERSATION_EVENTS } from '@/events'
 import type { ISessionPresenter } from './interface'
 import { MessageManager } from './managers/messageManager'
-import { buildUserMessageContext } from '../agentPresenter/message/messageFormatter'
+import { buildUserMessageContext } from './messageFormatter'
 import { CommandPermissionService } from '../permission/commandPermissionService'
 import { ConversationManager, type CreateConversationOptions } from './managers/conversationManager'
 import type { ConversationExportFormat } from '../exporter/formats/conversationExporter'
@@ -39,6 +39,7 @@ export class SessionPresenter implements ISessionPresenter {
   private exporter: IConversationExporter
   private commandPermissionService: CommandPermissionService
   private activeConversationBindings: Map<number, string> = new Map()
+  private legacyRuntimeInitialized = false
 
   constructor(options: {
     messageManager?: MessageManager
@@ -61,11 +62,20 @@ export class SessionPresenter implements ISessionPresenter {
       messageManager: this.messageManager,
       activeConversationBindings: this.activeConversationBindings
     })
+  }
+
+  initializeLegacyRuntime(): void {
+    if (this.legacyRuntimeInitialized) {
+      return
+    }
+
+    this.legacyRuntimeInitialized = true
+
     // Clean up conversation bindings when a bound renderer is closed.
     eventBus.on(TAB_EVENTS.CLOSED, (webContentsId: number) => {
       const activeConversationId = this.getActiveConversationIdSync(webContentsId)
       if (activeConversationId) {
-        void presenter.agentPresenter.cleanupConversation(activeConversationId)
+        void presenter.cleanupConversationRuntimeArtifacts(activeConversationId)
         this.commandPermissionService.clearConversation(activeConversationId)
         presenter.filePermissionService?.clearConversation(activeConversationId)
         presenter.settingsPermissionService?.clearConversation(activeConversationId)
@@ -91,7 +101,7 @@ export class SessionPresenter implements ISessionPresenter {
     })
 
     // 初始化时处理所有未完成的消息
-    this.messageManager.initializeUnfinishedMessages()
+    void this.messageManager.initializeUnfinishedMessages()
   }
 
   async createSession(params: CreateSessionParams): Promise<string> {
@@ -574,7 +584,7 @@ export class SessionPresenter implements ISessionPresenter {
   }
 
   async deleteConversation(conversationId: string): Promise<void> {
-    await presenter.agentPresenter.cleanupConversation(conversationId)
+    await presenter.cleanupConversationRuntimeArtifacts(conversationId)
     this.commandPermissionService.clearConversation(conversationId)
     presenter.filePermissionService?.clearConversation(conversationId)
     presenter.settingsPermissionService?.clearConversation(conversationId)
@@ -924,13 +934,13 @@ export class SessionPresenter implements ISessionPresenter {
     await this.llmProviderPresenter.setAcpWorkdir(conversationId, agentId, workdir)
   }
 
-  async warmupAcpProcess(agentId: string, workdir: string): Promise<void> {
+  async warmupAcpProcess(agentId: string, workdir?: string): Promise<void> {
     await this.llmProviderPresenter.warmupAcpProcess(agentId, workdir)
   }
 
   async getAcpProcessModes(
     agentId: string,
-    workdir: string
+    workdir?: string
   ): Promise<
     | {
         availableModes?: Array<{ id: string; name: string; description: string }>
@@ -1031,10 +1041,6 @@ export class SessionPresenter implements ISessionPresenter {
         : floatingWindow && floatingWindow.id === targetWindow.id
           ? 'floating'
           : 'main'
-    const sessionContext =
-      typeof presenter?.sessionManager?.getSessionSync === 'function'
-        ? presenter.sessionManager.getSessionSync(conversation.id)
-        : null
     const settings = conversation.settings as unknown as Omit<
       Session['config'],
       'sessionId' | 'title' | 'isPinned'
@@ -1042,7 +1048,7 @@ export class SessionPresenter implements ISessionPresenter {
 
     return {
       sessionId: conversation.id,
-      status: sessionContext?.status ?? 'idle',
+      status: 'idle',
       config: {
         ...settings,
         sessionId: conversation.id,

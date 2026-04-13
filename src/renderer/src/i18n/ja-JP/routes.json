@@ -15,5 +15,9 @@
   "settings-mcp-market": "MCP市場",
   "settings-acp": "ACPエージェント",
   "settings-skills": "Skills",
-  "settings-notifications-hooks": "通知とフック"
+  "settings-notifications-hooks": "フック",
+  "settings-dashboard": "Dashboard",
+  "settings-environments": "環境",
+  "settings-remote": "リモート",
+  "settings-deepchat-agents": "DeepChatエージェント"
 }

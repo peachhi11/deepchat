@@ -1,13 +1,64 @@
 import { describe, expect, it, vi } from 'vitest'
 import { defineComponent, reactive } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
+import { ACP_WORKSPACE_EVENTS } from '@/events'
+import type { ReasoningPortrait } from '../../../src/shared/types/model-db'
+import type { AcpConfigState } from '../../../src/shared/types/presenters'
+
+type ReasoningEffort = 'minimal' | 'low' | 'medium' | 'high'
+type TestGenerationSettings = {
+  systemPrompt: string
+  temperature: number
+  contextLength: number
+  maxTokens: number
+  thinkingBudget?: number
+  forceInterleavedThinkingCompat?: boolean
+  reasoningEffort?: ReasoningEffort
+  verbosity?: 'low' | 'medium' | 'high'
+}
+
+type ExtraModelGroup = {
+  providerId: string
+  providerName: string
+  models: Array<{
+    id: string
+    name: string
+    type?: 'chat' | 'embedding' | 'rerank' | 'imageGeneration'
+  }>
+}
 
 type SetupOptions = {
   agentId?: string
   hasActiveSession?: boolean
   activeProviderId?: string
   activeModelId?: string
+  activeProjectDir?: string | null
+  activeSessionSubagentEnabled?: boolean
+  draftSubagentEnabled?: boolean
   supportsEffort?: boolean
+  setSessionModelError?: Error
+  defaultModel?: { providerId: string; modelId: string } | null
+  preferredModel?: { providerId: string; modelId: string } | null
+  extraModelGroups?: ExtraModelGroup[]
+  reasoningEffortDefault?: ReasoningEffort
+  modelConfig?: Partial<TestGenerationSettings>
+  sessionSettings?: Partial<TestGenerationSettings> | null
+  draftGenerationSettings?: Partial<TestGenerationSettings>
+  reasoningPortrait?: ReasoningPortrait | null
+  projectPath?: string | null
+  acpDraftSessionId?: string | null
+  acpProcessConfig?: AcpConfigState | null
+  acpSessionConfig?: AcpConfigState | null
+}
+
+const createDeferred = <T>() => {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  return { promise, resolve, reject }
 }
 
 const passthrough = (name: string) =>
@@ -18,56 +69,188 @@ const passthrough = (name: string) =>
 
 const ButtonStub = defineComponent({
   name: 'Button',
-  emits: ['click'],
-  template: '<button @click="$emit(\'click\')"><slot /></button>'
-})
-
-const SliderStub = defineComponent({
-  name: 'Slider',
   props: {
-    modelValue: { type: Array, default: () => [] }
+    disabled: { type: Boolean, default: false }
   },
-  emits: ['update:modelValue'],
-  template: '<div class="slider-stub" />'
+  emits: ['click'],
+  template:
+    '<button v-bind="$attrs" :disabled="disabled" @click="$emit(\'click\', $event)"><slot /></button>'
 })
 
 const InputStub = defineComponent({
   name: 'Input',
   props: {
-    modelValue: { type: String, default: '' }
+    modelValue: { type: [String, Number], default: '' }
   },
   emits: ['update:modelValue'],
-  template: '<input class="input-stub" />'
+  template:
+    '<input class="input-stub" v-bind="$attrs" :value="modelValue ?? \'\'" @input="$emit(\'update:modelValue\', $event.target.value)" />'
+})
+
+const SelectStub = defineComponent({
+  name: 'Select',
+  props: {
+    modelValue: { type: [String, Boolean], default: undefined }
+  },
+  emits: ['update:modelValue'],
+  template: '<div class="select-stub" :data-model-value="String(modelValue ?? \'\')"><slot /></div>'
+})
+
+const SwitchStub = defineComponent({
+  name: 'Switch',
+  props: {
+    modelValue: { type: Boolean, default: false },
+    disabled: { type: Boolean, default: false }
+  },
+  emits: ['update:modelValue'],
+  template:
+    '<button class="switch-stub" v-bind="$attrs" :data-model-value="String(modelValue)" :disabled="disabled" @click="$emit(\'update:modelValue\', !modelValue)" />'
+})
+
+const createAcpConfigState = (
+  overrides: Partial<AcpConfigState> = {},
+  modelValue = 'gpt-5'
+): AcpConfigState => ({
+  source: 'configOptions',
+  options: [
+    {
+      id: 'model',
+      label: 'Model',
+      type: 'select',
+      category: 'model',
+      currentValue: modelValue,
+      options: [
+        { value: 'gpt-5', label: 'gpt-5' },
+        { value: 'gpt-5-mini', label: 'gpt-5-mini' }
+      ]
+    },
+    {
+      id: 'thought_level',
+      label: 'Thought Level',
+      type: 'select',
+      category: 'thought_level',
+      currentValue: 'medium',
+      options: [
+        { value: 'low', label: 'low' },
+        { value: 'medium', label: 'medium' },
+        { value: 'high', label: 'high' }
+      ]
+    },
+    {
+      id: 'mode',
+      label: 'Mode',
+      type: 'select',
+      category: 'mode',
+      currentValue: 'code',
+      options: [
+        { value: 'code', label: 'code' },
+        { value: 'ask', label: 'ask' }
+      ]
+    },
+    {
+      id: 'safe_edits',
+      label: 'Safe Edits',
+      type: 'boolean',
+      currentValue: true
+    }
+  ],
+  ...overrides
+})
+
+const createOverflowAcpConfigState = (): AcpConfigState => ({
+  source: 'configOptions',
+  options: [
+    ...createAcpConfigState().options,
+    {
+      id: 'extra_select',
+      label: 'Extra Select',
+      type: 'select',
+      currentValue: 'strict',
+      options: [
+        { value: 'strict', label: 'Strict' },
+        { value: 'relaxed', label: 'Relaxed' }
+      ]
+    },
+    {
+      id: 'extra_toggle',
+      label: 'Extra Toggle',
+      type: 'boolean',
+      currentValue: false
+    }
+  ]
 })
 
 const setup = async (options: SetupOptions = {}) => {
   vi.resetModules()
 
+  const extraModelGroups = options.extraModelGroups ?? []
+  const reasoningEffortDefault = options.reasoningEffortDefault ?? 'medium'
+  const reasoningPortrait =
+    options.reasoningPortrait ??
+    ({
+      supported: true,
+      defaultEnabled: true,
+      mode: 'mixed',
+      budget: { min: 0, max: 8192, default: 512 },
+      ...(options.supportsEffort === false
+        ? {}
+        : {
+            effort: reasoningEffortDefault,
+            effortOptions: ['minimal', 'low', 'medium', 'high'] as ReasoningEffort[]
+          }),
+      verbosity: 'medium',
+      verbosityOptions: ['low', 'medium', 'high'] as Array<'low' | 'medium' | 'high'>
+    } satisfies ReasoningPortrait)
+  const baseModelGroups = [
+    {
+      providerId: 'openai',
+      models: [{ id: 'gpt-4', name: 'GPT-4' }]
+    },
+    {
+      providerId: 'anthropic',
+      models: [{ id: 'claude-3-5-sonnet', name: 'Claude 3.5 Sonnet' }]
+    },
+    {
+      providerId: 'acp',
+      models: [
+        { id: 'acp-agent', name: 'ACP Agent' },
+        { id: 'dimcode-acp', name: 'DimCode - Default' }
+      ]
+    }
+  ]
   const modelLookup = new Map([
     ['gpt-4', { model: { id: 'gpt-4', name: 'GPT-4' } }],
+    ['claude-3-5-sonnet', { model: { id: 'claude-3-5-sonnet', name: 'Claude 3.5 Sonnet' } }],
     ['acp-agent', { model: { id: 'acp-agent', name: 'ACP Agent' } }],
     ['dimcode-acp', { model: { id: 'dimcode-acp', name: 'DimCode - Default' } }]
   ])
+  extraModelGroups.forEach((group) => {
+    group.models.forEach((model) => {
+      modelLookup.set(model.id, { model })
+    })
+  })
 
   const themeStore = reactive({
     isDark: false
   })
 
   const modelStore = reactive({
-    enabledModels: [
-      {
-        providerId: 'openai',
-        models: [{ id: 'gpt-4', name: 'GPT-4' }]
-      },
-      {
-        providerId: 'acp',
-        models: [
-          { id: 'acp-agent', name: 'ACP Agent' },
-          { id: 'dimcode-acp', name: 'DimCode - Default' }
-        ]
-      }
-    ],
+    enabledModels: [...baseModelGroups, ...extraModelGroups],
     findModelByIdOrName: vi.fn((value: string) => modelLookup.get(value) ?? null)
+  })
+
+  const providerStore = reactive({
+    sortedProviders: [
+      { id: 'openai', name: 'OpenAI', enable: true },
+      { id: 'anthropic', name: 'Anthropic', enable: true },
+      { id: 'acp', name: 'ACP', enable: true }
+    ].concat(
+      extraModelGroups.map((group) => ({
+        id: group.providerId,
+        name: group.providerName,
+        enable: true
+      }))
+    )
   })
 
   const agentId = options.agentId ?? 'deepchat'
@@ -91,12 +274,25 @@ const setup = async (options: SetupOptions = {}) => {
     activeSession: hasActiveSession
       ? {
           id: 's1',
+          agentId: options.agentId ?? 'deepchat',
           providerId: options.activeProviderId ?? 'openai',
           modelId: options.activeModelId ?? 'gpt-4',
-          status: 'idle'
+          projectDir: options.activeProjectDir ?? options.projectPath ?? null,
+          status: 'idle',
+          sessionKind: 'regular',
+          subagentEnabled: options.activeSessionSubagentEnabled === true
         }
       : null,
-    setSessionModel: vi.fn().mockResolvedValue(undefined)
+    setSessionModel: options.setSessionModelError
+      ? vi.fn().mockRejectedValue(options.setSessionModelError)
+      : vi.fn().mockResolvedValue(undefined),
+    setSessionSubagentEnabled: vi
+      .fn()
+      .mockImplementation(async (_sessionId: string, enabled: boolean) => {
+        if (sessionStore.activeSession) {
+          sessionStore.activeSession.subagentEnabled = enabled
+        }
+      })
   })
 
   const draftStore = reactive({
@@ -108,34 +304,61 @@ const setup = async (options: SetupOptions = {}) => {
     contextLength: undefined as number | undefined,
     maxTokens: undefined as number | undefined,
     thinkingBudget: undefined as number | undefined,
+    forceInterleavedThinkingCompat: undefined as boolean | undefined,
     reasoningEffort: undefined as 'minimal' | 'low' | 'medium' | 'high' | undefined,
     verbosity: undefined as 'low' | 'medium' | 'high' | undefined,
+    subagentEnabled: options.draftSubagentEnabled === true,
+    ...options.draftGenerationSettings,
     updateGenerationSettings: vi.fn((patch: Record<string, unknown>) =>
       Object.assign(draftStore, patch)
-    )
+    ),
+    resetGenerationSettings: vi.fn(() => {
+      draftStore.systemPrompt = undefined
+      draftStore.temperature = undefined
+      draftStore.contextLength = undefined
+      draftStore.maxTokens = undefined
+      draftStore.thinkingBudget = undefined
+      draftStore.forceInterleavedThinkingCompat = undefined
+      draftStore.reasoningEffort = undefined
+      draftStore.verbosity = undefined
+    })
+  })
+
+  const projectStore = reactive({
+    selectedProject: options.projectPath
+      ? {
+          path: options.projectPath
+        }
+      : null
   })
 
   const configPresenter = {
     getSetting: vi.fn().mockImplementation((key: string) => {
+      if (key === 'preferredModel') {
+        return Promise.resolve(options.preferredModel)
+      }
       if (key === 'defaultModel') {
-        return Promise.resolve({ providerId: 'openai', modelId: 'gpt-4' })
+        return Promise.resolve(options.defaultModel ?? { providerId: 'openai', modelId: 'gpt-4' })
       }
       return Promise.resolve(undefined)
     }),
     setSetting: vi.fn().mockResolvedValue(undefined),
-    getModelConfig: vi.fn().mockReturnValue({
+    getModelConfig: vi.fn().mockResolvedValue({
       temperature: 0.7,
       contextLength: 16000,
       maxTokens: 4096,
       thinkingBudget: 512,
-      reasoningEffort: 'medium',
-      verbosity: 'medium'
+      forceInterleavedThinkingCompat: undefined,
+      reasoningEffort: reasoningEffortDefault,
+      verbosity: 'medium',
+      ...options.modelConfig
     }),
+    getReasoningPortrait: vi.fn().mockResolvedValue(reasoningPortrait),
     getDefaultSystemPrompt: vi.fn().mockResolvedValue('Default prompt'),
     supportsReasoningCapability: vi.fn().mockReturnValue(true),
     getThinkingBudgetRange: vi.fn().mockReturnValue({ min: 0, max: 8192, default: 512 }),
     supportsReasoningEffortCapability: vi.fn().mockReturnValue(options.supportsEffort ?? true),
-    getReasoningEffortDefault: vi.fn().mockReturnValue('medium'),
+    getReasoningEffortDefault: vi.fn().mockReturnValue(reasoningEffortDefault),
     supportsVerbosityCapability: vi.fn().mockReturnValue(true),
     getVerbosityDefault: vi.fn().mockReturnValue('medium'),
     getSystemPrompts: vi.fn().mockResolvedValue([
@@ -147,20 +370,37 @@ const setup = async (options: SetupOptions = {}) => {
     ])
   }
 
-  const baseSessionSettings = {
+  const baseSessionSettings: TestGenerationSettings = {
     systemPrompt: 'Default prompt',
     temperature: 0.7,
     contextLength: 16000,
     maxTokens: 4096,
     thinkingBudget: 512,
-    reasoningEffort: 'medium' as const,
-    verbosity: 'medium' as const
+    forceInterleavedThinkingCompat: undefined,
+    reasoningEffort: 'medium',
+    verbosity: 'medium',
+    ...options.sessionSettings
   }
 
-  const newAgentPresenter = {
+  const sessionSettingsResult =
+    options.sessionSettings === null ? null : ({ ...baseSessionSettings } as TestGenerationSettings)
+
+  const agentSessionPresenter = {
     getPermissionMode: vi.fn().mockResolvedValue('full_access'),
     setPermissionMode: vi.fn().mockResolvedValue(undefined),
-    getSessionGenerationSettings: vi.fn().mockResolvedValue(baseSessionSettings),
+    getSessionGenerationSettings: vi.fn().mockResolvedValue(sessionSettingsResult),
+    getAcpSessionConfigOptions: vi.fn().mockResolvedValue(options.acpSessionConfig ?? null),
+    setAcpSessionConfigOption: vi
+      .fn()
+      .mockImplementation(async (_sessionId: string, configId: string, value: string | boolean) => {
+        const currentState = options.acpSessionConfig ?? createAcpConfigState()
+        return {
+          ...currentState,
+          options: currentState.options.map((option) =>
+            option.id === configId ? { ...option, currentValue: value } : option
+          )
+        } satisfies AcpConfigState
+      }),
     updateSessionGenerationSettings: vi
       .fn()
       .mockImplementation((_: string, patch: any) =>
@@ -168,11 +408,48 @@ const setup = async (options: SetupOptions = {}) => {
       )
   }
 
+  const llmproviderPresenter = {
+    warmupAcpProcess: vi.fn().mockResolvedValue(undefined),
+    getAcpProcessConfigOptions: vi.fn().mockResolvedValue(options.acpProcessConfig ?? null)
+  }
+
+  const ipcListeners = new Map<string, Set<(event: unknown, payload?: unknown) => void>>()
+  ;(
+    window as typeof window & {
+      electron?: {
+        ipcRenderer?: {
+          on: ReturnType<typeof vi.fn>
+          removeListener: ReturnType<typeof vi.fn>
+          emit: (channel: string, payload?: unknown) => void
+        }
+      }
+    }
+  ).electron = {
+    ipcRenderer: {
+      on: vi.fn((channel: string, handler: (event: unknown, payload?: unknown) => void) => {
+        const handlers = ipcListeners.get(channel) ?? new Set()
+        handlers.add(handler)
+        ipcListeners.set(channel, handlers)
+      }),
+      removeListener: vi.fn(
+        (channel: string, handler: (event: unknown, payload?: unknown) => void) => {
+          ipcListeners.get(channel)?.delete(handler)
+        }
+      ),
+      emit: (channel: string, payload?: unknown) => {
+        ipcListeners.get(channel)?.forEach((handler) => handler({}, payload))
+      }
+    }
+  }
+
   vi.doMock('@/stores/theme', () => ({
     useThemeStore: () => themeStore
   }))
   vi.doMock('@/stores/modelStore', () => ({
     useModelStore: () => modelStore
+  }))
+  vi.doMock('@/stores/providerStore', () => ({
+    useProviderStore: () => providerStore
   }))
   vi.doMock('@/stores/ui/agent', () => ({
     useAgentStore: () => agentStore
@@ -183,9 +460,15 @@ const setup = async (options: SetupOptions = {}) => {
   vi.doMock('@/stores/ui/draft', () => ({
     useDraftStore: () => draftStore
   }))
+  vi.doMock('@/stores/ui/project', () => ({
+    useProjectStore: () => projectStore
+  }))
   vi.doMock('@/composables/usePresenter', () => ({
-    usePresenter: (name: string) =>
-      name === 'configPresenter' ? configPresenter : newAgentPresenter
+    usePresenter: (name: string) => {
+      if (name === 'configPresenter') return configPresenter
+      if (name === 'llmproviderPresenter') return llmproviderPresenter
+      return agentSessionPresenter
+    }
   }))
   vi.doMock('vue-i18n', () => ({
     useI18n: () => ({
@@ -195,40 +478,56 @@ const setup = async (options: SetupOptions = {}) => {
   vi.doMock('@iconify/vue', () => ({
     Icon: defineComponent({
       name: 'Icon',
-      template: '<span class="icon-stub" />'
+      props: {
+        icon: { type: String, default: '' }
+      },
+      template: '<span class="icon-stub" :data-icon="icon" />'
     })
   }))
   vi.doMock('@/components/chat-input/McpIndicator.vue', () => ({
     default: defineComponent({
       name: 'McpIndicator',
-      template: '<div class="mcp-indicator-stub" />'
+      props: {
+        showSystemPromptSection: { type: Boolean, default: false },
+        showSubagentToggle: { type: Boolean, default: false },
+        subagentEnabled: { type: Boolean, default: false },
+        subagentTogglePending: { type: Boolean, default: false }
+      },
+      emits: ['toggle-subagents'],
+      template:
+        '<div class="mcp-indicator-stub" :data-show-system-prompt-section="String(showSystemPromptSection)" :data-show-subagent-toggle="String(showSubagentToggle)" :data-subagent-enabled="String(subagentEnabled)" :data-subagent-toggle-pending="String(subagentTogglePending)"><button class="mcp-subagents-toggle-stub" type="button" @click="$emit(\'toggle-subagents\', !subagentEnabled)" /></div>'
     })
   }))
 
   const ChatStatusBar = (await import('@/components/chat/ChatStatusBar.vue')).default
   const wrapper = mount(ChatStatusBar, {
+    props: {
+      acpDraftSessionId: options.acpDraftSessionId ?? null
+    },
     global: {
       stubs: {
         Button: ButtonStub,
-        Slider: SliderStub,
         Input: InputStub,
         DropdownMenu: passthrough('DropdownMenu'),
         DropdownMenuContent: passthrough('DropdownMenuContent'),
         DropdownMenuItem: passthrough('DropdownMenuItem'),
         DropdownMenuTrigger: passthrough('DropdownMenuTrigger'),
-        Select: passthrough('Select'),
+        Popover: passthrough('Popover'),
+        PopoverContent: passthrough('PopoverContent'),
+        PopoverTrigger: passthrough('PopoverTrigger'),
+        Select: SelectStub,
         SelectContent: passthrough('SelectContent'),
         SelectItem: passthrough('SelectItem'),
         SelectTrigger: passthrough('SelectTrigger'),
         SelectValue: passthrough('SelectValue'),
+        Switch: SwitchStub,
         ModelIcon: defineComponent({
           name: 'ModelIcon',
           props: {
             modelId: { type: String, default: '' }
           },
           template: '<div class="model-icon-stub" :data-model-id="modelId" />'
-        }),
-        Icon: true
+        })
       }
     }
   })
@@ -237,30 +536,212 @@ const setup = async (options: SetupOptions = {}) => {
 
   return {
     wrapper,
-    newAgentPresenter,
+    agentSessionPresenter,
+    llmproviderPresenter,
+    agentStore,
     sessionStore,
     draftStore,
-    configPresenter
+    configPresenter,
+    projectStore,
+    ipcRenderer: window.electron?.ipcRenderer
   }
 }
 
-describe('ChatStatusBar advanced settings', () => {
-  it('shows advanced settings in default agent and hides in ACP', async () => {
+const findNumericInput = (wrapper: Awaited<ReturnType<typeof setup>>['wrapper'], control: string) =>
+  wrapper.find(`input[data-setting-control="${control}"]`)
+
+const findNumericButton = (
+  wrapper: Awaited<ReturnType<typeof setup>>['wrapper'],
+  control: string,
+  action: 'increment' | 'decrement'
+) => wrapper.find(`button[data-setting-control="${control}"][data-setting-action="${action}"]`)
+
+const findThinkingBudgetToggle = (wrapper: Awaited<ReturnType<typeof setup>>['wrapper']) =>
+  wrapper.find('.switch-stub[data-setting-control="thinkingBudget-toggle"]')
+
+const findInterleavedThinkingToggle = (wrapper: Awaited<ReturnType<typeof setup>>['wrapper']) =>
+  wrapper.find('.switch-stub[data-setting-control="forceInterleavedThinkingCompat-toggle"]')
+
+const commitNumericInput = async (
+  wrapper: Awaited<ReturnType<typeof setup>>['wrapper'],
+  control: string,
+  value: string
+) => {
+  const input = findNumericInput(wrapper, control)
+  await input.trigger('focus')
+  await input.setValue(value)
+  await input.trigger('blur')
+}
+
+describe('ChatStatusBar model and session panels', () => {
+  it('passes system prompt section to the unified session panel in deepchat and hides it in ACP', async () => {
     const deepchat = await setup({ agentId: 'deepchat', hasActiveSession: false })
-    expect((deepchat.wrapper.vm as any).showAdvancedSettingsButton).toBe(true)
+    expect(
+      deepchat.wrapper.find('.mcp-indicator-stub').attributes('data-show-system-prompt-section')
+    ).toBe('true')
+    expect(deepchat.wrapper.text()).toContain('chat.permissionMode.fullAccess')
 
     const acp = await setup({ agentId: 'acp-agent', hasActiveSession: false })
-    expect((acp.wrapper.vm as any).showAdvancedSettingsButton).toBe(false)
+    expect(
+      acp.wrapper.find('.mcp-indicator-stub').attributes('data-show-system-prompt-section')
+    ).toBe('false')
+    expect(acp.wrapper.text()).not.toContain('chat.permissionMode.fullAccess')
   })
 
-  it('shows effort selector only when model capability supports it', async () => {
+  it('routes the subagent toggle through the unified tools panel', async () => {
+    const active = await setup({
+      agentId: 'deepchat',
+      hasActiveSession: true,
+      activeSessionSubagentEnabled: true
+    })
+
+    const activeIndicator = active.wrapper.find('.mcp-indicator-stub')
+    expect(activeIndicator.attributes('data-show-subagent-toggle')).toBe('true')
+    expect(activeIndicator.attributes('data-subagent-enabled')).toBe('true')
+    expect(active.wrapper.text()).not.toContain('chat.subagents.label')
+
+    await active.wrapper.get('.mcp-subagents-toggle-stub').trigger('click')
+    await flushPromises()
+
+    expect(active.sessionStore.setSessionSubagentEnabled).toHaveBeenCalledWith('s1', false)
+
+    const draft = await setup({
+      agentId: 'deepchat',
+      hasActiveSession: false,
+      draftSubagentEnabled: false
+    })
+
+    const draftIndicator = draft.wrapper.find('.mcp-indicator-stub')
+    expect(draftIndicator.attributes('data-show-subagent-toggle')).toBe('true')
+    expect(draftIndicator.attributes('data-subagent-enabled')).toBe('false')
+
+    await draft.wrapper.get('.mcp-subagents-toggle-stub').trigger('click')
+    await flushPromises()
+
+    expect(draft.draftStore.subagentEnabled).toBe(true)
+  })
+
+  it('hides the subagent toggle for active regular sessions that are not deepchat', async () => {
+    const active = await setup({
+      agentId: 'acp-agent',
+      hasActiveSession: true,
+      activeProviderId: 'openai'
+    })
+
+    const activeIndicator = active.wrapper.find('.mcp-indicator-stub')
+    expect(activeIndicator.attributes('data-show-subagent-toggle')).toBe('false')
+  })
+
+  it('renders compact model ids in the trigger and list, and keeps chevron actions for settings', async () => {
+    const { wrapper } = await setup({
+      agentId: 'deepchat',
+      hasActiveSession: false,
+      defaultModel: { providerId: 'openai', modelId: 'gpt-4' },
+      preferredModel: { providerId: 'openai', modelId: 'gpt-4' }
+    })
+
+    expect((wrapper.vm as any).displayModelText).toBe('gpt-4')
+    expect(wrapper.text()).toContain('gpt-4')
+    expect(wrapper.text()).toContain('claude-3-5-sonnet')
+    expect(wrapper.text()).not.toContain('GPT-4')
+    expect(wrapper.text()).not.toContain('Claude 3.5 Sonnet')
+
+    const actionButtons = wrapper.findAll('button[title="chat.advancedSettings.button"]')
+    expect(actionButtons.length).toBeGreaterThan(0)
+    expect(
+      wrapper
+        .findAll('.icon-stub')
+        .some((icon) => icon.attributes('data-icon') === 'lucide:chevron-right')
+    ).toBe(true)
+
+    await actionButtons[0].trigger('click')
+    await flushPromises()
+
+    expect((wrapper.vm as any).isModelSettingsExpanded).toBe(true)
+  })
+
+  it('filters embedding and rerank models out of the chat model list', async () => {
+    const { wrapper } = await setup({
+      extraModelGroups: [
+        {
+          providerId: 'new-api',
+          providerName: 'New API',
+          models: [
+            { id: 'text-embedding-3-large', name: 'Embedding', type: 'embedding' },
+            { id: 'bge-rerank-v2', name: 'Rerank', type: 'rerank' },
+            { id: 'gpt-4.1', name: 'GPT-4.1', type: 'chat' },
+            { id: 'gpt-image-1', name: 'GPT Image 1', type: 'imageGeneration' }
+          ]
+        }
+      ]
+    })
+
+    const filteredGroups = (wrapper.vm as any).filteredModelGroups as Array<{
+      providerId: string
+      models: Array<{ id: string }>
+    }>
+    const newApiGroup = filteredGroups.find((group) => group.providerId === 'new-api')
+
+    expect(newApiGroup?.models.map((model) => model.id)).toEqual(['gpt-4.1', 'gpt-image-1'])
+    expect(wrapper.text()).not.toContain('text-embedding-3-large')
+    expect(wrapper.text()).not.toContain('bge-rerank-v2')
+  })
+
+  it('shows Ollama chat models in the picker while filtering Ollama embedding models out', async () => {
+    const { wrapper } = await setup({
+      extraModelGroups: [
+        {
+          providerId: 'ollama',
+          providerName: 'Ollama',
+          models: [
+            { id: 'deepseek-r1:1.5b', name: 'DeepSeek R1', type: 'chat' },
+            { id: 'nomic-embed-text:latest', name: 'Nomic Embed', type: 'embedding' }
+          ]
+        }
+      ]
+    })
+
+    const filteredGroups = (wrapper.vm as any).filteredModelGroups as Array<{
+      providerId: string
+      models: Array<{ id: string }>
+    }>
+    const ollamaGroup = filteredGroups.find((group) => group.providerId === 'ollama')
+
+    expect(ollamaGroup?.models.map((model) => model.id)).toEqual(['deepseek-r1:1.5b'])
+    expect(wrapper.text()).toContain('deepseek-r1:1.5b')
+    expect(wrapper.text()).not.toContain('nomic-embed-text:latest')
+  })
+
+  it('skips non-chat defaults and falls back to the first chat-selectable model', async () => {
+    const { wrapper, draftStore } = await setup({
+      extraModelGroups: [
+        {
+          providerId: 'new-api',
+          providerName: 'New API',
+          models: [{ id: 'text-embedding-3-large', name: 'Embedding', type: 'embedding' }]
+        }
+      ],
+      defaultModel: { providerId: 'new-api', modelId: 'text-embedding-3-large' },
+      preferredModel: undefined
+    })
+
+    expect(draftStore.providerId).toBe('openai')
+    expect(draftStore.modelId).toBe('gpt-4')
+    expect((wrapper.vm as any).displayModelText).toBe('gpt-4')
+  })
+
+  it('shows reasoning effort controls only when model capability supports it', async () => {
     const enabled = await setup({
       hasActiveSession: true,
       activeProviderId: 'openai',
       activeModelId: 'gpt-4',
       supportsEffort: true
     })
-    expect((enabled.wrapper.vm as any).showEffortSelector).toBe(true)
+    await (enabled.wrapper.vm as any).openModelSettings('openai', 'gpt-4')
+    await flushPromises()
+
+    expect((enabled.wrapper.vm as any).showReasoningEffort).toBe(true)
+    expect(enabled.wrapper.text()).toContain('settings.model.modelConfig.reasoningEffort.label')
 
     const disabled = await setup({
       hasActiveSession: true,
@@ -268,41 +749,544 @@ describe('ChatStatusBar advanced settings', () => {
       activeModelId: 'gpt-4',
       supportsEffort: false
     })
-    expect((disabled.wrapper.vm as any).showEffortSelector).toBe(false)
+    await (disabled.wrapper.vm as any).openModelSettings('openai', 'gpt-4')
+    await flushPromises()
+
+    expect((disabled.wrapper.vm as any).showReasoningEffort).toBe(false)
+    expect(disabled.wrapper.text()).not.toContain(
+      'settings.model.modelConfig.reasoningEffort.label'
+    )
   })
 
-  it('uses unified defaults for draft advanced settings', async () => {
+  it('keeps showing loading until settings finish loading for the current model selection', async () => {
+    const { wrapper, sessionStore, agentSessionPresenter } = await setup({
+      hasActiveSession: true,
+      activeProviderId: 'openai',
+      activeModelId: 'gpt-4'
+    })
+    const pendingSettings = createDeferred<TestGenerationSettings>()
+    const nextSettings: TestGenerationSettings = {
+      systemPrompt: 'Anthropic prompt',
+      temperature: 0.3,
+      contextLength: 32000,
+      maxTokens: 2048,
+      thinkingBudget: 256,
+      reasoningEffort: 'low',
+      verbosity: 'high'
+    }
+
+    sessionStore.setSessionModel.mockImplementation(async () => {
+      if (sessionStore.activeSession) {
+        sessionStore.activeSession.providerId = 'anthropic'
+        sessionStore.activeSession.modelId = 'claude-3-5-sonnet'
+      }
+    })
+    agentSessionPresenter.getSessionGenerationSettings.mockClear()
+    agentSessionPresenter.getSessionGenerationSettings.mockImplementation(
+      () => pendingSettings.promise
+    )
+
+    await (wrapper.vm as any).openModelSettings('anthropic', 'claude-3-5-sonnet')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('common.loading')
+    expect(wrapper.text()).not.toContain('chat.advancedSettings.temperature')
+    expect((wrapper.vm as any).showSystemPromptSection).toBe(false)
+    expect((wrapper.vm as any).selectedSystemPromptId).toBe('empty')
+    expect(wrapper.find('.mcp-indicator-stub').attributes('data-show-system-prompt-section')).toBe(
+      'false'
+    )
+
+    pendingSettings.resolve(nextSettings)
+    await flushPromises()
+
+    expect(wrapper.text()).not.toContain('common.loading')
+    expect((wrapper.vm as any).localSettings).toEqual(nextSettings)
+    expect((wrapper.vm as any).showSystemPromptSection).toBe(true)
+    expect((wrapper.vm as any).selectedSystemPromptId).toBe('__custom__')
+  })
+
+  it('keeps non-grok-3-mini xAI models on the full reasoning effort scale', async () => {
+    const { wrapper } = await setup({
+      hasActiveSession: false,
+      preferredModel: { providerId: 'xai', modelId: 'grok-4' },
+      defaultModel: { providerId: 'xai', modelId: 'grok-4' },
+      extraModelGroups: [
+        {
+          providerId: 'xai',
+          providerName: 'xAI',
+          models: [{ id: 'grok-4', name: 'Grok 4' }]
+        }
+      ],
+      reasoningEffortDefault: 'minimal',
+      reasoningPortrait: {
+        supported: true,
+        defaultEnabled: true,
+        mode: 'effort',
+        effort: 'minimal',
+        effortOptions: ['minimal', 'low', 'medium', 'high'],
+        verbosity: 'medium',
+        verbosityOptions: ['low', 'medium', 'high']
+      }
+    })
+
+    await (wrapper.vm as any).openModelSettings('xai', 'grok-4')
+    await flushPromises()
+
+    expect((wrapper.vm as any).localSettings.reasoningEffort).toBe('minimal')
+    expect(wrapper.text()).toContain('settings.model.modelConfig.reasoningEffort.options.minimal')
+    expect(wrapper.text()).toContain('settings.model.modelConfig.reasoningEffort.options.medium')
+  })
+
+  it('keeps grok-3-mini models on binary reasoning effort options', async () => {
+    const { wrapper } = await setup({
+      hasActiveSession: false,
+      preferredModel: { providerId: 'xai', modelId: 'grok-3-mini-fast-beta' },
+      defaultModel: { providerId: 'xai', modelId: 'grok-3-mini-fast-beta' },
+      extraModelGroups: [
+        {
+          providerId: 'xai',
+          providerName: 'xAI',
+          models: [{ id: 'grok-3-mini-fast-beta', name: 'Grok 3 Mini Fast Beta' }]
+        }
+      ],
+      reasoningEffortDefault: 'minimal',
+      reasoningPortrait: {
+        supported: true,
+        defaultEnabled: true,
+        mode: 'effort',
+        effort: 'low',
+        effortOptions: ['low', 'high'],
+        verbosity: 'medium',
+        verbosityOptions: ['low', 'medium', 'high']
+      }
+    })
+
+    await (wrapper.vm as any).openModelSettings('xai', 'grok-3-mini-fast-beta')
+    await flushPromises()
+
+    expect((wrapper.vm as any).localSettings.reasoningEffort).toBe('low')
+    expect(wrapper.text()).toContain('settings.model.modelConfig.reasoningEffort.options.low')
+    expect(wrapper.text()).toContain('settings.model.modelConfig.reasoningEffort.options.high')
+    expect(wrapper.text()).not.toContain(
+      'settings.model.modelConfig.reasoningEffort.options.minimal'
+    )
+    expect(wrapper.text()).not.toContain(
+      'settings.model.modelConfig.reasoningEffort.options.medium'
+    )
+  })
+
+  it('uses unified defaults for draft model settings', async () => {
     const { wrapper } = await setup({ agentId: 'deepchat', hasActiveSession: false })
+
+    expect((wrapper.vm as any).localSettings.temperature).toBe(0.7)
+    expect((wrapper.vm as any).localSettings.contextLength).toBe(16000)
+    expect((wrapper.vm as any).localSettings.maxTokens).toBe(4096)
+    expect((wrapper.vm as any).localSettings.thinkingBudget).toBe(512)
+  })
+
+  it('awaits async model config values for draft model settings', async () => {
+    const { wrapper } = await setup({
+      agentId: 'deepchat',
+      hasActiveSession: false,
+      modelConfig: {
+        temperature: 1,
+        contextLength: 8192,
+        maxTokens: 2048,
+        thinkingBudget: 512,
+        forceInterleavedThinkingCompat: true,
+        reasoningEffort: 'medium',
+        verbosity: 'medium'
+      }
+    })
+
+    expect((wrapper.vm as any).localSettings.temperature).toBe(1)
+    expect((wrapper.vm as any).localSettings.contextLength).toBe(8192)
+    expect((wrapper.vm as any).localSettings.maxTokens).toBe(2048)
+    expect((wrapper.vm as any).localSettings.forceInterleavedThinkingCompat).toBe(true)
+  })
+
+  it('shows interleaved thinking as enabled when the provider portrait requires it', async () => {
+    const { wrapper } = await setup({
+      agentId: 'deepchat',
+      hasActiveSession: false,
+      reasoningPortrait: {
+        supported: true,
+        defaultEnabled: true,
+        interleaved: true,
+        mode: 'effort',
+        effort: 'medium',
+        effortOptions: ['minimal', 'low', 'medium', 'high'],
+        verbosity: 'medium',
+        verbosityOptions: ['low', 'medium', 'high']
+      }
+    })
+
+    await (wrapper.vm as any).openModelSettings('openai', 'gpt-4')
+    await flushPromises()
+
+    expect((wrapper.vm as any).localSettings.forceInterleavedThinkingCompat).toBe(true)
+    expect(findInterleavedThinkingToggle(wrapper).attributes('data-model-value')).toBe('true')
+  })
+
+  it('ignores existing draft generation overrides when loading draft model defaults', async () => {
+    const { wrapper, draftStore } = await setup({
+      agentId: 'deepchat',
+      hasActiveSession: false,
+      draftGenerationSettings: {
+        temperature: 1.9,
+        contextLength: 64000,
+        maxTokens: 8192,
+        thinkingBudget: 2048
+      }
+    })
+
+    expect(draftStore.temperature).toBe(1.9)
+    expect(draftStore.contextLength).toBe(64000)
+    expect((wrapper.vm as any).localSettings.temperature).toBe(0.7)
+    expect((wrapper.vm as any).localSettings.contextLength).toBe(16000)
+    expect((wrapper.vm as any).localSettings.maxTokens).toBe(4096)
+    expect((wrapper.vm as any).localSettings.thinkingBudget).toBe(512)
+  })
+
+  it('falls back to model defaults when the active session has no saved generation settings', async () => {
+    const { wrapper, agentSessionPresenter } = await setup({
+      agentId: 'deepchat',
+      hasActiveSession: true,
+      activeProviderId: 'openai',
+      activeModelId: 'gpt-4',
+      sessionSettings: null
+    })
+
+    expect(agentSessionPresenter.getSessionGenerationSettings).toHaveBeenCalledWith('s1')
+    expect((wrapper.vm as any).localSettings).toEqual({
+      systemPrompt: 'Default prompt',
+      temperature: 0.7,
+      contextLength: 16000,
+      maxTokens: 4096,
+      thinkingBudget: 512,
+      reasoningEffort: 'medium',
+      verbosity: 'medium'
+    })
+  })
+
+  it('steps numeric settings with buttons and blocks invalid relation commits', async () => {
+    const { wrapper } = await setup({ agentId: 'deepchat', hasActiveSession: false })
+    await (wrapper.vm as any).openModelSettings('openai', 'gpt-4')
+    await flushPromises()
+
+    await findNumericButton(wrapper, 'temperature', 'increment').trigger('click')
+    expect((wrapper.vm as any).localSettings.temperature).toBe(0.8)
+
+    await findNumericButton(wrapper, 'contextLength', 'decrement').trigger('click')
+    expect((wrapper.vm as any).localSettings.contextLength).toBe(14976)
+
+    await findNumericButton(wrapper, 'thinkingBudget', 'increment').trigger('click')
+    expect((wrapper.vm as any).localSettings.thinkingBudget).toBe(640)
+
+    await commitNumericInput(wrapper, 'contextLength', '2048')
+    expect((wrapper.vm as any).localSettings.contextLength).toBe(14976)
+    expect((wrapper.vm as any).localSettings.maxTokens).toBe(4096)
+    expect((findNumericInput(wrapper, 'contextLength').element as HTMLInputElement).value).toBe(
+      '2048'
+    )
+    expect(wrapper.text()).toContain(
+      'chat.advancedSettings.validation.contextLengthAtLeastMaxTokens'
+    )
+
+    await commitNumericInput(wrapper, 'maxTokens', '2048')
+    expect((wrapper.vm as any).localSettings.maxTokens).toBe(2048)
+
+    await commitNumericInput(wrapper, 'contextLength', '2048')
+    expect((wrapper.vm as any).localSettings.contextLength).toBe(2048)
+  })
+
+  it('keeps invalid numeric drafts visible and only commits valid values', async () => {
+    const { wrapper, draftStore } = await setup({ agentId: 'deepchat', hasActiveSession: false })
+    await (wrapper.vm as any).openModelSettings('openai', 'gpt-4')
+    await flushPromises()
+
+    const temperatureInput = findNumericInput(wrapper, 'temperature')
+    await temperatureInput.trigger('focus')
+    await temperatureInput.setValue('-3.2')
+
+    expect((wrapper.vm as any).localSettings.temperature).toBe(0.7)
+    expect((temperatureInput.element as HTMLInputElement).value).toBe('-3.2')
+
+    await temperatureInput.trigger('blur')
+    expect((wrapper.vm as any).localSettings.temperature).toBe(-3.2)
+    expect(draftStore.temperature).toBe(-3.2)
+
+    await commitNumericInput(wrapper, 'contextLength', '100.5')
+    await commitNumericInput(wrapper, 'maxTokens', '999999')
 
     expect((wrapper.vm as any).localSettings.contextLength).toBe(16000)
     expect((wrapper.vm as any).localSettings.maxTokens).toBe(4096)
+    expect((findNumericInput(wrapper, 'contextLength').element as HTMLInputElement).value).toBe(
+      '100.5'
+    )
+    expect((findNumericInput(wrapper, 'maxTokens').element as HTMLInputElement).value).toBe(
+      '999999'
+    )
+    expect(wrapper.text()).toContain('chat.advancedSettings.validation.nonNegativeInteger')
+    expect(wrapper.text()).toContain(
+      'chat.advancedSettings.validation.maxTokensWithinContextLength'
+    )
+    expect(draftStore.contextLength).toBeUndefined()
+    expect(draftStore.maxTokens).toBeUndefined()
+  })
+
+  it('treats negative thinking budget sentinels as switch-off state', async () => {
+    const { wrapper, configPresenter } = await setup({
+      agentId: 'deepchat',
+      hasActiveSession: false,
+      reasoningPortrait: {
+        supported: true,
+        defaultEnabled: true,
+        mode: 'budget',
+        budget: { min: 0, max: 8192, default: -1, auto: -1 },
+        verbosity: 'medium',
+        verbosityOptions: ['low', 'medium', 'high']
+      }
+    })
+    configPresenter.getModelConfig.mockReturnValue({
+      temperature: 0.7,
+      contextLength: 16000,
+      maxTokens: 4096,
+      thinkingBudget: -1,
+      verbosity: 'medium'
+    })
+
+    await (wrapper.vm as any).openModelSettings('anthropic', 'claude-3-5-sonnet')
+    await flushPromises()
+
+    expect(findThinkingBudgetToggle(wrapper).attributes('data-model-value')).toBe('false')
+    expect(findNumericInput(wrapper, 'thinkingBudget').exists()).toBe(false)
+    expect(wrapper.text()).toContain('common.disabled')
+
+    await findThinkingBudgetToggle(wrapper).trigger('click')
+    expect(findThinkingBudgetToggle(wrapper).attributes('data-model-value')).toBe('true')
+    expect((wrapper.vm as any).localSettings.thinkingBudget).toBe(0)
+
+    await findThinkingBudgetToggle(wrapper).trigger('click')
+    expect(findThinkingBudgetToggle(wrapper).attributes('data-model-value')).toBe('false')
+    expect((wrapper.vm as any).localSettings.thinkingBudget).toBeUndefined()
+  })
+
+  it('prefers preferredModel over defaultModel for draft selection', async () => {
+    const { wrapper, draftStore } = await setup({
+      agentId: 'deepchat',
+      hasActiveSession: false,
+      defaultModel: { providerId: 'openai', modelId: 'gpt-4' },
+      preferredModel: { providerId: 'anthropic', modelId: 'claude-3-5-sonnet' }
+    })
+
+    expect(draftStore.providerId).toBe('anthropic')
+    expect(draftStore.modelId).toBe('claude-3-5-sonnet')
+    expect((wrapper.vm as any).displayModelText).toBe('claude-3-5-sonnet')
   })
 
   it('debounces generation setting persistence to a single session update', async () => {
     vi.useFakeTimers()
 
-    const { wrapper, newAgentPresenter } = await setup({
+    const { wrapper, agentSessionPresenter } = await setup({
+      hasActiveSession: true,
+      activeProviderId: 'openai',
+      activeModelId: 'gpt-4'
+    })
+    await (wrapper.vm as any).openModelSettings('openai', 'gpt-4')
+    await flushPromises()
+
+    await commitNumericInput(wrapper, 'temperature', '0.9')
+    await commitNumericInput(wrapper, 'temperature', '1.1')
+    await commitNumericInput(wrapper, 'temperature', '1.2')
+
+    vi.advanceTimersByTime(299)
+    await flushPromises()
+    expect(agentSessionPresenter.updateSessionGenerationSettings).not.toHaveBeenCalled()
+
+    vi.advanceTimersByTime(1)
+    await flushPromises()
+
+    expect(agentSessionPresenter.updateSessionGenerationSettings).toHaveBeenCalledTimes(1)
+    expect(agentSessionPresenter.updateSessionGenerationSettings).toHaveBeenCalledWith(
+      's1',
+      expect.objectContaining({ temperature: 1.2 })
+    )
+
+    vi.runOnlyPendingTimers()
+    vi.useRealTimers()
+  })
+
+  it('turns thinking budget off with the switch and clears the persisted field', async () => {
+    vi.useFakeTimers()
+
+    const { wrapper, agentSessionPresenter } = await setup({
+      hasActiveSession: true,
+      activeProviderId: 'openai',
+      activeModelId: 'gpt-4'
+    })
+    await (wrapper.vm as any).openModelSettings('openai', 'gpt-4')
+    await flushPromises()
+
+    await findThinkingBudgetToggle(wrapper).trigger('click')
+    expect((wrapper.vm as any).localSettings.thinkingBudget).toBeUndefined()
+
+    vi.advanceTimersByTime(300)
+    await flushPromises()
+
+    expect(agentSessionPresenter.updateSessionGenerationSettings).toHaveBeenCalledWith(
+      's1',
+      expect.objectContaining({ thinkingBudget: undefined })
+    )
+
+    vi.runOnlyPendingTimers()
+    vi.useRealTimers()
+  })
+
+  it('sends an explicit false when interleaved thinking is turned off', async () => {
+    vi.useFakeTimers()
+
+    const { wrapper, agentSessionPresenter } = await setup({
+      hasActiveSession: true,
+      activeProviderId: 'openai',
+      activeModelId: 'gpt-4',
+      sessionSettings: null,
+      modelConfig: {
+        forceInterleavedThinkingCompat: true
+      },
+      reasoningPortrait: {
+        supported: true,
+        defaultEnabled: true,
+        interleaved: true,
+        mode: 'effort',
+        effort: 'medium',
+        effortOptions: ['minimal', 'low', 'medium', 'high'],
+        verbosity: 'medium',
+        verbosityOptions: ['low', 'medium', 'high']
+      }
+    })
+    await (wrapper.vm as any).openModelSettings('openai', 'gpt-4')
+    await flushPromises()
+
+    await findInterleavedThinkingToggle(wrapper).trigger('click')
+    expect((wrapper.vm as any).localSettings.forceInterleavedThinkingCompat).toBe(false)
+
+    vi.advanceTimersByTime(300)
+    await flushPromises()
+
+    expect(agentSessionPresenter.updateSessionGenerationSettings).toHaveBeenCalledWith(
+      's1',
+      expect.objectContaining({
+        forceInterleavedThinkingCompat: false
+      })
+    )
+
+    vi.runOnlyPendingTimers()
+    vi.useRealTimers()
+  })
+
+  it('keeps invalid drafts and field errors when an older session response returns later', async () => {
+    vi.useFakeTimers()
+
+    const firstResponse = createDeferred<TestGenerationSettings>()
+
+    const { wrapper, agentSessionPresenter } = await setup({
       hasActiveSession: true,
       activeProviderId: 'openai',
       activeModelId: 'gpt-4'
     })
 
-    ;(wrapper.vm as any).onTemperatureSlider([0.9])
-    ;(wrapper.vm as any).onTemperatureSlider([1.1])
-    ;(wrapper.vm as any).onTemperatureSlider([1.2])
-
-    vi.advanceTimersByTime(299)
-    await flushPromises()
-    expect(newAgentPresenter.updateSessionGenerationSettings).not.toHaveBeenCalled()
-
-    vi.advanceTimersByTime(1)
-    await flushPromises()
-
-    expect(newAgentPresenter.updateSessionGenerationSettings).toHaveBeenCalledTimes(1)
-    expect(newAgentPresenter.updateSessionGenerationSettings).toHaveBeenCalledWith(
-      's1',
-      expect.objectContaining({ temperature: 1.2 })
+    agentSessionPresenter.updateSessionGenerationSettings.mockImplementation(
+      () => firstResponse.promise
     )
+
+    await (wrapper.vm as any).openModelSettings('openai', 'gpt-4')
+    await flushPromises()
+
+    await commitNumericInput(wrapper, 'temperature', '1.1')
+    vi.advanceTimersByTime(300)
+    await flushPromises()
+
+    await commitNumericInput(wrapper, 'contextLength', '100.5')
+
+    firstResponse.resolve({
+      systemPrompt: 'Default prompt',
+      temperature: 1.1,
+      contextLength: 16000,
+      maxTokens: 4096,
+      thinkingBudget: 512,
+      reasoningEffort: 'medium',
+      verbosity: 'medium'
+    })
+    await flushPromises()
+
+    expect((wrapper.vm as any).localSettings.temperature).toBe(1.1)
+    expect((wrapper.vm as any).localSettings.contextLength).toBe(16000)
+    expect((findNumericInput(wrapper, 'contextLength').element as HTMLInputElement).value).toBe(
+      '100.5'
+    )
+    expect(wrapper.text()).toContain('chat.advancedSettings.validation.nonNegativeInteger')
+
+    vi.runOnlyPendingTimers()
+    vi.useRealTimers()
+  })
+
+  it('keeps thinking budget off when an older session response returns later', async () => {
+    vi.useFakeTimers()
+
+    const firstResponse = createDeferred<TestGenerationSettings>()
+    const secondResponse = createDeferred<TestGenerationSettings>()
+    const responseQueue = [firstResponse.promise, secondResponse.promise]
+
+    const { wrapper, agentSessionPresenter } = await setup({
+      hasActiveSession: true,
+      activeProviderId: 'openai',
+      activeModelId: 'gpt-4'
+    })
+
+    agentSessionPresenter.updateSessionGenerationSettings.mockImplementation(
+      () => responseQueue.shift() ?? Promise.reject(new Error('missing mocked response'))
+    )
+
+    await (wrapper.vm as any).openModelSettings('openai', 'gpt-4')
+    await flushPromises()
+
+    await findNumericButton(wrapper, 'thinkingBudget', 'increment').trigger('click')
+    vi.advanceTimersByTime(300)
+    await flushPromises()
+
+    await findThinkingBudgetToggle(wrapper).trigger('click')
+
+    firstResponse.resolve({
+      systemPrompt: 'Default prompt',
+      temperature: 0.7,
+      contextLength: 16000,
+      maxTokens: 4096,
+      thinkingBudget: 640,
+      reasoningEffort: 'medium',
+      verbosity: 'medium'
+    })
+    await flushPromises()
+
+    expect((wrapper.vm as any).localSettings.thinkingBudget).toBeUndefined()
+    expect(findThinkingBudgetToggle(wrapper).attributes('data-model-value')).toBe('false')
+
+    vi.advanceTimersByTime(300)
+    await flushPromises()
+
+    secondResponse.resolve({
+      systemPrompt: 'Default prompt',
+      temperature: 0.7,
+      contextLength: 16000,
+      maxTokens: 4096,
+      reasoningEffort: 'medium',
+      verbosity: 'medium'
+    } as TestGenerationSettings)
+    await flushPromises()
+
+    expect((wrapper.vm as any).localSettings.thinkingBudget).toBeUndefined()
+    expect(findThinkingBudgetToggle(wrapper).attributes('data-model-value')).toBe('false')
 
     vi.runOnlyPendingTimers()
     vi.useRealTimers()
@@ -326,7 +1310,7 @@ describe('ChatStatusBar advanced settings', () => {
   })
 
   it('reloads active session generation settings after switching models', async () => {
-    const { wrapper, sessionStore, newAgentPresenter } = await setup({
+    const { wrapper, sessionStore, agentSessionPresenter } = await setup({
       agentId: 'deepchat',
       hasActiveSession: true,
       activeProviderId: 'openai',
@@ -349,14 +1333,33 @@ describe('ChatStatusBar advanced settings', () => {
         sessionStore.activeSession.modelId = 'claude-3-5-sonnet'
       }
     })
-    newAgentPresenter.getSessionGenerationSettings.mockClear()
-    newAgentPresenter.getSessionGenerationSettings.mockResolvedValue(nextSettings)
+    agentSessionPresenter.getSessionGenerationSettings.mockClear()
+    agentSessionPresenter.getSessionGenerationSettings.mockResolvedValue(nextSettings)
 
     await (wrapper.vm as any).selectModel('anthropic', 'claude-3-5-sonnet')
     await flushPromises()
 
-    expect(newAgentPresenter.getSessionGenerationSettings).toHaveBeenCalledWith('s1')
+    expect(agentSessionPresenter.getSessionGenerationSettings).toHaveBeenCalledWith('s1')
     expect((wrapper.vm as any).localSettings).toEqual(nextSettings)
+  })
+
+  it('clears model settings panel state when switching models is rejected', async () => {
+    const { wrapper } = await setup({
+      agentId: 'deepchat',
+      hasActiveSession: true,
+      activeProviderId: 'openai',
+      activeModelId: 'gpt-4',
+      setSessionModelError: new Error('Cannot switch model while session is generating.')
+    })
+
+    await (wrapper.vm as any).openModelSettings('anthropic', 'claude-3-5-sonnet')
+    await flushPromises()
+
+    expect((wrapper.vm as any).isModelSettingsExpanded).toBe(false)
+    expect((wrapper.vm as any).modelSettingsSelection).toEqual({
+      providerId: 'openai',
+      modelId: 'gpt-4'
+    })
   })
 
   it('updates draft model and preferred model when no active session', async () => {
@@ -376,6 +1379,58 @@ describe('ChatStatusBar advanced settings', () => {
     })
   })
 
+  it('resets draft numeric overrides when switching models without an active session', async () => {
+    const { wrapper, draftStore, configPresenter } = await setup({
+      agentId: 'deepchat',
+      hasActiveSession: false
+    })
+    configPresenter.getModelConfig.mockImplementation((modelId: string, providerId: string) => {
+      if (providerId === 'anthropic' && modelId === 'claude-3-5-sonnet') {
+        return {
+          temperature: 0.2,
+          contextLength: 32000,
+          maxTokens: 2048,
+          thinkingBudget: 256,
+          reasoningEffort: 'low',
+          verbosity: 'high'
+        }
+      }
+      return {
+        temperature: 0.7,
+        contextLength: 16000,
+        maxTokens: 4096,
+        thinkingBudget: 512,
+        reasoningEffort: 'medium',
+        verbosity: 'medium'
+      }
+    })
+    ;(wrapper.vm as any).onTemperatureInput('1.5')
+    ;(wrapper.vm as any).commitTemperatureInput()
+    ;(wrapper.vm as any).onContextLengthInput('8192')
+    ;(wrapper.vm as any).commitContextLengthInput()
+    ;(wrapper.vm as any).onMaxTokensInput('1024')
+    ;(wrapper.vm as any).commitMaxTokensInput()
+    ;(wrapper.vm as any).onThinkingBudgetInput('1024')
+    ;(wrapper.vm as any).commitThinkingBudgetInput()
+
+    expect(draftStore.temperature).toBe(1.5)
+    expect(draftStore.contextLength).toBe(8192)
+    expect(draftStore.maxTokens).toBe(1024)
+    expect(draftStore.thinkingBudget).toBe(1024)
+
+    await (wrapper.vm as any).selectModel('anthropic', 'claude-3-5-sonnet')
+    await flushPromises()
+
+    expect(draftStore.temperature).toBeUndefined()
+    expect(draftStore.contextLength).toBeUndefined()
+    expect(draftStore.maxTokens).toBeUndefined()
+    expect(draftStore.thinkingBudget).toBeUndefined()
+    expect((wrapper.vm as any).localSettings.temperature).toBe(0.2)
+    expect((wrapper.vm as any).localSettings.contextLength).toBe(32000)
+    expect((wrapper.vm as any).localSettings.maxTokens).toBe(2048)
+    expect((wrapper.vm as any).localSettings.thinkingBudget).toBe(256)
+  })
+
   it('uses ACP model id for the displayed icon', async () => {
     const { wrapper } = await setup({
       agentId: 'dimcode-acp',
@@ -387,23 +1442,310 @@ describe('ChatStatusBar advanced settings', () => {
     expect(wrapper.find('.model-icon-stub').attributes('data-model-id')).toBe('dimcode-acp')
   })
 
-  it('keeps advanced modal open when clicking advanced select portal content', async () => {
-    const { wrapper } = await setup({ agentId: 'deepchat', hasActiveSession: false })
+  it('shows only the ACP badge and MCP when no ACP config data is available', async () => {
+    const { wrapper, llmproviderPresenter } = await setup({
+      agentId: 'acp-agent',
+      hasActiveSession: false,
+      projectPath: null,
+      acpProcessConfig: null
+    })
 
-    ;(wrapper.vm as any).toggleAdvancedSettings()
+    expect(llmproviderPresenter.warmupAcpProcess).toHaveBeenCalledWith('acp-agent', undefined)
+    expect(llmproviderPresenter.getAcpProcessConfigOptions).toHaveBeenCalledWith(
+      'acp-agent',
+      undefined
+    )
+    expect(wrapper.find('.acp-agent-badge').exists()).toBe(true)
+    expect(wrapper.findAll('.acp-inline-option')).toHaveLength(0)
+    expect(wrapper.find('.acp-overflow-button').exists()).toBe(false)
+    expect(wrapper.find('.mcp-indicator-stub').exists()).toBe(true)
+    expect(wrapper.text()).not.toContain('chat.permissionMode.fullAccess')
+    expect((wrapper.vm as any).acpConfigReadOnly).toBe(true)
+  })
+
+  it('shows ACP badge loading while warmup config is pending without cache', async () => {
+    const pendingWarmup = createDeferred<AcpConfigState | null>()
+    const { wrapper, llmproviderPresenter, agentStore, projectStore } = await setup({
+      agentId: 'deepchat',
+      hasActiveSession: false
+    })
+
+    llmproviderPresenter.getAcpProcessConfigOptions.mockImplementation(() => pendingWarmup.promise)
+    projectStore.selectedProject = { path: '/tmp/workspace' }
+    agentStore.selectedAgentId = 'acp-agent'
     await flushPromises()
-    expect((wrapper.vm as any).isAdvancedOpen).toBe(true)
 
-    const portal = document.createElement('div')
-    portal.className = 'advanced-settings-portal-content'
-    const option = document.createElement('button')
-    portal.appendChild(option)
-    document.body.appendChild(portal)
+    expect(llmproviderPresenter.warmupAcpProcess).toHaveBeenLastCalledWith(
+      'acp-agent',
+      '/tmp/workspace'
+    )
+    expect(wrapper.find('.acp-agent-badge').exists()).toBe(true)
+    expect(wrapper.find('.acp-agent-loading-indicator').exists()).toBe(true)
+    expect(wrapper.findAll('.acp-inline-option')).toHaveLength(0)
+    expect(wrapper.find('.acp-overflow-button').exists()).toBe(false)
+    expect((wrapper.vm as any).isAcpConfigLoading).toBe(true)
 
-    option.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+    pendingWarmup.resolve(createAcpConfigState())
+    await flushPromises()
+  })
+
+  it('clears ACP badge loading when the current warmup config-ready event arrives', async () => {
+    const pendingWarmup = createDeferred<AcpConfigState | null>()
+    const processConfig = createAcpConfigState({}, 'gpt-5')
+    const { wrapper, llmproviderPresenter, agentStore, projectStore, ipcRenderer } = await setup({
+      agentId: 'deepchat',
+      hasActiveSession: false
+    })
+
+    llmproviderPresenter.getAcpProcessConfigOptions.mockImplementation(() => pendingWarmup.promise)
+    projectStore.selectedProject = { path: '/tmp/workspace' }
+    agentStore.selectedAgentId = 'acp-agent'
     await flushPromises()
 
-    expect((wrapper.vm as any).isAdvancedOpen).toBe(true)
-    portal.remove()
+    expect((wrapper.vm as any).isAcpConfigLoading).toBe(true)
+
+    ipcRenderer?.emit(ACP_WORKSPACE_EVENTS.SESSION_CONFIG_OPTIONS_READY, {
+      agentId: 'acp-agent',
+      workdir: '/tmp/workspace',
+      configState: processConfig
+    })
+    await flushPromises()
+
+    expect((wrapper.vm as any).isAcpConfigLoading).toBe(false)
+    expect(wrapper.find('.acp-agent-loading-indicator').exists()).toBe(false)
+    expect(wrapper.findAll('.acp-inline-option')).toHaveLength(3)
+
+    pendingWarmup.resolve(processConfig)
+    await flushPromises()
+  })
+
+  it('keeps ACP badge loading when an old agent warmup event arrives after switching agents', async () => {
+    const pendingWarmup = createDeferred<AcpConfigState | null>()
+    const claudeConfig = createAcpConfigState({}, 'gpt-5-mini')
+    const { wrapper, llmproviderPresenter, agentStore, projectStore, ipcRenderer } = await setup({
+      agentId: 'deepchat',
+      hasActiveSession: false
+    })
+
+    llmproviderPresenter.getAcpProcessConfigOptions.mockImplementation(() => pendingWarmup.promise)
+    projectStore.selectedProject = { path: '/tmp/workspace' }
+
+    agentStore.selectedAgentId = 'codex'
+    await flushPromises()
+    expect((wrapper.vm as any).isAcpConfigLoading).toBe(true)
+
+    agentStore.selectedAgentId = 'claude'
+    await flushPromises()
+
+    expect((wrapper.vm as any).isAcpConfigLoading).toBe(true)
+    expect((wrapper.vm as any).acpConfigState).toBeNull()
+
+    ipcRenderer?.emit(ACP_WORKSPACE_EVENTS.SESSION_CONFIG_OPTIONS_READY, {
+      agentId: 'codex',
+      workdir: '/tmp/workspace',
+      configState: createAcpConfigState({}, 'gpt-5')
+    })
+    await flushPromises()
+
+    expect((wrapper.vm as any).isAcpConfigLoading).toBe(true)
+    expect((wrapper.vm as any).acpConfigState).toBeNull()
+
+    ipcRenderer?.emit(ACP_WORKSPACE_EVENTS.SESSION_CONFIG_OPTIONS_READY, {
+      agentId: 'claude',
+      workdir: '/tmp/workspace',
+      configState: claudeConfig
+    })
+    await flushPromises()
+
+    expect((wrapper.vm as any).isAcpConfigLoading).toBe(false)
+    expect((wrapper.vm as any).acpConfigState.options[0].currentValue).toBe('gpt-5-mini')
+
+    pendingWarmup.resolve(claudeConfig)
+    await flushPromises()
+  })
+
+  it('shows ACP warmup config inline before session id is ready', async () => {
+    const processConfig = createAcpConfigState({}, 'gpt-5')
+    const { wrapper, llmproviderPresenter } = await setup({
+      agentId: 'acp-agent',
+      hasActiveSession: false,
+      projectPath: '/tmp/workspace',
+      acpProcessConfig: processConfig
+    })
+
+    expect(llmproviderPresenter.warmupAcpProcess).toHaveBeenCalledWith(
+      'acp-agent',
+      '/tmp/workspace'
+    )
+    expect(llmproviderPresenter.getAcpProcessConfigOptions).toHaveBeenCalledWith(
+      'acp-agent',
+      '/tmp/workspace'
+    )
+    expect(wrapper.findAll('.acp-inline-option')).toHaveLength(3)
+    expect(wrapper.find('.acp-inline-option[data-option-id="model"]').exists()).toBe(true)
+    expect(wrapper.find('.acp-inline-option[data-option-id="thought_level"]').exists()).toBe(true)
+    expect(wrapper.find('.acp-inline-option[data-option-id="mode"]').exists()).toBe(true)
+    expect(wrapper.find('.acp-inline-option[data-option-id="safe_edits"]').exists()).toBe(false)
+    expect(wrapper.find('.acp-overflow-button').exists()).toBe(true)
+    expect(wrapper.findAll('.acp-overflow-option')).toHaveLength(1)
+    expect(wrapper.find('.acp-overflow-option[data-option-id="safe_edits"]').exists()).toBe(true)
+    expect(wrapper.find('.acp-inline-option-title[data-option-id="model"]').text()).toBe('Model')
+    expect(wrapper.find('.acp-inline-option-title[data-option-id="thought_level"]').text()).toBe(
+      'Thought Level'
+    )
+    expect(wrapper.find('.acp-inline-option-title[data-option-id="mode"]').text()).toBe('Mode')
+    const statusGroups = wrapper.findAll('div.flex.items-center.gap-1')
+    const rightActions = statusGroups.at(-1)
+    expect(rightActions?.element.lastElementChild?.classList.contains('mcp-indicator-stub')).toBe(
+      true
+    )
+    expect((wrapper.vm as any).acpConfigReadOnly).toBe(true)
+  })
+
+  it('isolates warmup config cache by ACP agent id', async () => {
+    const codexConfig = createAcpConfigState({}, 'gpt-5')
+    const claudeConfig = createAcpConfigState({}, 'gpt-5-mini')
+    const pendingWarmup = createDeferred<AcpConfigState | null>()
+    const { wrapper, llmproviderPresenter, agentStore, ipcRenderer } = await setup({
+      agentId: 'codex',
+      hasActiveSession: false,
+      projectPath: '/tmp/workspace',
+      acpProcessConfig: codexConfig
+    })
+
+    expect((wrapper.vm as any).acpConfigState.options[0].currentValue).toBe('gpt-5')
+    expect(wrapper.find('.acp-inline-option[data-option-id="model"]').attributes('title')).toBe(
+      'gpt-5'
+    )
+
+    llmproviderPresenter.getAcpProcessConfigOptions.mockImplementation(() => pendingWarmup.promise)
+
+    agentStore.selectedAgentId = 'claude'
+    await flushPromises()
+
+    expect(wrapper.findAll('.acp-inline-option')).toHaveLength(0)
+    expect(wrapper.find('.acp-overflow-button').exists()).toBe(false)
+    expect((wrapper.vm as any).acpConfigState).toBeNull()
+
+    ipcRenderer?.emit(ACP_WORKSPACE_EVENTS.SESSION_CONFIG_OPTIONS_READY, {
+      agentId: 'codex',
+      workdir: '/tmp/workspace',
+      configState: codexConfig
+    })
+    await flushPromises()
+
+    expect(wrapper.findAll('.acp-inline-option')).toHaveLength(0)
+    expect((wrapper.vm as any).acpConfigState).toBeNull()
+
+    ipcRenderer?.emit(ACP_WORKSPACE_EVENTS.SESSION_CONFIG_OPTIONS_READY, {
+      agentId: 'claude',
+      workdir: '/tmp/workspace',
+      configState: claudeConfig
+    })
+    await flushPromises()
+
+    expect(wrapper.findAll('.acp-inline-option')).toHaveLength(3)
+    expect((wrapper.vm as any).acpConfigState.options[0].currentValue).toBe('gpt-5-mini')
+    expect(wrapper.find('.acp-inline-option[data-option-id="model"]').attributes('title')).toBe(
+      'gpt-5-mini'
+    )
+
+    agentStore.selectedAgentId = 'codex'
+    await flushPromises()
+
+    expect(wrapper.findAll('.acp-inline-option')).toHaveLength(3)
+    expect((wrapper.vm as any).acpConfigState.options[0].currentValue).toBe('gpt-5')
+    expect(wrapper.find('.acp-inline-option[data-option-id="model"]').attributes('title')).toBe(
+      'gpt-5'
+    )
+
+    pendingWarmup.resolve(codexConfig)
+    await flushPromises()
+  })
+
+  it('moves ACP overflow options into the gear popover', async () => {
+    const { wrapper } = await setup({
+      agentId: 'acp-agent',
+      hasActiveSession: false,
+      projectPath: '/tmp/workspace',
+      acpProcessConfig: createOverflowAcpConfigState()
+    })
+
+    expect(wrapper.findAll('.acp-inline-option')).toHaveLength(3)
+    expect(wrapper.find('.acp-overflow-button').exists()).toBe(true)
+    expect(wrapper.findAll('.acp-overflow-option')).toHaveLength(3)
+    expect(wrapper.find('.acp-overflow-option[data-option-id="safe_edits"]').exists()).toBe(true)
+    expect(wrapper.find('.acp-overflow-option[data-option-id="extra_select"]').exists()).toBe(true)
+    expect(wrapper.find('.acp-overflow-option[data-option-id="extra_toggle"]').exists()).toBe(true)
+  })
+
+  it('keeps ACP session config read-only until session config finishes loading', async () => {
+    const processConfig = createAcpConfigState({}, 'gpt-5')
+    const sessionConfig = createAcpConfigState({}, 'gpt-5-mini')
+    const pendingSessionConfig = createDeferred<AcpConfigState | null>()
+    const { wrapper, agentSessionPresenter } = await setup({
+      agentId: 'acp-agent',
+      hasActiveSession: false,
+      projectPath: '/tmp/workspace',
+      acpProcessConfig: processConfig
+    })
+
+    agentSessionPresenter.getAcpSessionConfigOptions.mockImplementation(
+      () => pendingSessionConfig.promise
+    )
+
+    await wrapper.setProps({ acpDraftSessionId: 'draft-1' })
+    await flushPromises()
+
+    expect(agentSessionPresenter.getAcpSessionConfigOptions).toHaveBeenCalledWith('draft-1')
+    expect((wrapper.vm as any).acpConfigState).toBeNull()
+    expect((wrapper.vm as any).acpConfigReadOnly).toBe(true)
+    expect(wrapper.findAll('.acp-inline-option')).toHaveLength(0)
+
+    pendingSessionConfig.resolve(sessionConfig)
+    await flushPromises()
+
+    expect((wrapper.vm as any).acpConfigState.options[0].currentValue).toBe('gpt-5-mini')
+    expect((wrapper.vm as any).acpConfigReadOnly).toBe(false)
+    expect(wrapper.find('.acp-inline-option[data-option-id="model"]').attributes('title')).toBe(
+      'gpt-5-mini'
+    )
+  })
+
+  it('switches from warmup config to session config and writes ACP options through the session presenter', async () => {
+    const processConfig = createAcpConfigState({}, 'gpt-5')
+    const sessionConfig = createAcpConfigState({}, 'gpt-5-mini')
+    const { wrapper, agentSessionPresenter } = await setup({
+      agentId: 'acp-agent',
+      hasActiveSession: false,
+      projectPath: '/tmp/workspace',
+      acpProcessConfig: processConfig,
+      acpSessionConfig: sessionConfig
+    })
+
+    expect(wrapper.text()).toContain('gpt-5')
+    expect((wrapper.vm as any).acpConfigReadOnly).toBe(true)
+
+    await wrapper.setProps({ acpDraftSessionId: 'draft-1' })
+    await flushPromises()
+
+    expect(agentSessionPresenter.getAcpSessionConfigOptions).toHaveBeenCalledWith('draft-1')
+    expect(wrapper.text()).toContain('gpt-5-mini')
+    expect((wrapper.vm as any).acpConfigReadOnly).toBe(false)
+    ;(wrapper.vm as any).onAcpInlineOptionOpenChange('model', true)
+    expect((wrapper.vm as any).acpInlineOpenOptionId).toBe('model')
+
+    await wrapper
+      .find('.acp-inline-option-item[data-option-id="model"][data-value="gpt-5"]')
+      .trigger('click')
+    await flushPromises()
+
+    expect(agentSessionPresenter.setAcpSessionConfigOption).toHaveBeenCalledWith(
+      'draft-1',
+      'model',
+      'gpt-5'
+    )
+    expect((wrapper.vm as any).acpInlineOpenOptionId).toBeNull()
+    expect((wrapper.vm as any).acpConfigState.options[0].currentValue).toBe('gpt-5')
   })
 })

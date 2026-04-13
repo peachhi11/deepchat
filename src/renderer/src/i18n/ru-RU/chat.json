@@ -28,12 +28,41 @@
     "agentWorkspaceTooltip": "Установить рабочий каталог агента",
     "attach": "Прикрепить",
     "voiceInput": "Голосовой ввод",
+    "queue": "В очередь",
+    "stop": "Стоп",
     "mcp": {
       "badge": "MCP {count}",
       "title": "Включённые MCP",
       "empty": "Нет включённых сервисов",
       "openSettings": "Открыть настройки MCP"
+    },
+    "tools": {
+      "badge": "Tools",
+      "title": "Tools",
+      "mcpSection": "MCP",
+      "builtinSection": "Встроенные инструменты",
+      "loading": "Loading tools...",
+      "builtinEmpty": "No built-in tools available",
+      "groups": {
+        "agentFilesystem": "Agent Filesystem",
+        "agentCore": "Agent Core",
+        "agentSkills": "Agent Skills",
+        "deepchatSettings": "DeepChat Settings",
+        "yobrowser": "YoBrowser"
+      }
     }
+  },
+  "pendingInput": {
+    "steer": "Направление",
+    "queueCount": "В ожидании {count}/{max}",
+    "resumeQueue": "Продолжить отправку",
+    "toSteer": "Направить",
+    "locked": "Зафиксировано",
+    "reorder": "Изменить порядок",
+    "files": "{count} файлов",
+    "attachmentsOnly": "{count} вложений",
+    "empty": "Пустое сообщение",
+    "limitReached": "Область ожидания заполнена (макс. {max})."
   },
   "features": {
     "webSearch": "Поиск в интернете",
@@ -54,6 +83,7 @@
   "messages": {
     "thinking": "Думаю ...",
     "rateLimitWaiting": "Ограничение скорости, ожидание в очереди...",
+    "rateLimitCompactLoading": "Ограничение скорости ({seconds}с)",
     "rateLimitTitle": "Ограничение скорости запросов",
     "rateLimitQueue": "Позиция в очереди",
     "rateLimitEstimated": "Предполагаемое время ожидания",
@@ -72,17 +102,6 @@
     "generationComplete": "Поколение завершено",
     "generationError": "Поколение не удалось"
   },
-  "navigation": {
-    "title": "Навигация по сообщениям",
-    "searchPlaceholder": "Поиск сообщений...",
-    "noResults": "Подходящих сообщений не найдено",
-    "noMessages": "Пока сообщений нет",
-    "totalMessages": "Всего {count} сообщений",
-    "searchResults": "Найдено {count} результатов из {total} сообщений",
-    "userMessage": "Сообщение пользователя",
-    "assistantMessage": "Ответ ассистента",
-    "unknownMessage": "Неизвестное сообщение"
-  },
   "toolCall": {
     "title": "Вызов инструмента",
     "calling": "Вызов инструмента выполняется",
@@ -92,13 +111,24 @@
     "clickToView": "Нажмите, чтобы посмотреть детали",
     "functionName": "Имя функции",
     "params": "Параметры",
-    "responseData": "Данные ответа"
-  },
-  "mcpUi": {
-    "badge": "пользовательский интерфейс",
-    "collapse": "закрывать",
-    "expand": "Расширять",
-    "title": "MCP UI"
+    "responseData": "Данные ответа",
+    "subagents": {
+      "summary": "{mode} · {count} субагентов",
+      "unnamedTask": "Безымянная задача",
+      "mode": {
+        "parallel": "Параллельно",
+        "chain": "Последовательно"
+      },
+      "status": {
+        "queued": "В очереди",
+        "running": "Выполняется",
+        "completed": "Завершено",
+        "error": "Ошибка",
+        "cancelled": "Отменено",
+        "waiting_permission": "Ожидает разрешения",
+        "waiting_question": "Ожидает ввода"
+      }
+    }
   },
   "mode": {
     "acpAgent": "Агент АШП",
@@ -107,7 +137,8 @@
   },
   "topbar": {
     "share": "Поделиться",
-    "more": "Ещё"
+    "more": "Ещё",
+    "backToParent": "Вернуться к родительской сессии"
   },
   "advancedSettings": {
     "button": "Расширенные",
@@ -120,16 +151,28 @@
     "maxTokens": "Макс. токенов",
     "thinkingBudget": "Бюджет размышления",
     "verbosity": "Детализация ответа",
+    "forceInterleavedThinkingCompat": "Interleaved Thinking",
+    "forceInterleavedThinkingCompatDescription": "Определяет, будет ли эта сессия обрабатывать сообщения рассуждений и tool-call в режиме Interleaved Thinking.",
     "verbosityPlaceholder": "Выберите уровень детализации",
     "currentCustomPrompt": "Текущий пользовательский",
-    "useDefault": "Использовать по умолчанию"
+    "useDefault": "Использовать по умолчанию",
+    "decreaseValue": "Уменьшить {label}",
+    "increaseValue": "Увеличить {label}",
+    "toggleValue": "Включить или выключить {label}",
+    "validation": {
+      "finiteNumber": "Должно быть конечным числом",
+      "nonNegativeInteger": "Должно быть неотрицательным целым числом",
+      "contextLengthAtLeastMaxTokens": "Должно быть больше или равно максимальному числу токенов",
+      "maxTokensWithinContextLength": "Должно быть меньше или равно длине контекста"
+    }
   },
   "workspace": {
     "collapse": "закрывать",
     "sections": {
       "files": "Файлы",
       "git": "Git",
-      "artifacts": "Artifacts"
+      "artifacts": "Артефакты",
+      "subagents": "Субагенты"
     },
     "files": {
       "contextMenu": {
@@ -183,7 +226,19 @@
         "truncated": "[обрезано]"
       }
     },
-    "title": "рабочее пространство"
+    "title": "рабочее пространство",
+    "subagents": {
+      "empty": "Дочерних сессий пока нет",
+      "self": "Этот агент",
+      "status": {
+        "working": "Выполняется",
+        "error": "Ошибка",
+        "idle": "Неактивно"
+      }
+    }
+  },
+  "modelPicker": {
+    "empty": "Модели не найдены"
   },
   "audio": {
     "play": "Воспроизвести",
@@ -222,9 +277,60 @@
     "allAgents": "Все агенты",
     "expandSidebar": "Развернуть боковую панель",
     "collapseSidebar": "Свернуть боковую панель",
+    "remoteControlStatus": {
+      "disabled": "Удалённое управление отключено",
+      "stopped": "Удалённое управление остановлено",
+      "starting": "Удалённое управление запускается",
+      "running": "Удалённое управление работает",
+      "backoff": "Удалённое управление повторяет попытку",
+      "error": "Ошибка удалённого управления"
+    },
     "groupByDate": "Группировать по дате",
     "groupByProject": "Группировать по проекту",
+    "pinned": "Закрепленные",
     "emptyTitle": "Пока нет диалогов",
-    "emptyDescription": "Начните новый чат, чтобы приступить"
+    "emptyDescription": "Начните новый чат, чтобы приступить",
+    "remoteControlDisabled": "Отключено",
+    "searchPlaceholder": "Поиск по чатам",
+    "searchAriaLabel": "Поиск по чатам",
+    "searchEmptyTitle": "Совпадений не найдено",
+    "searchEmptyDescription": "Попробуйте другое ключевое слово в названии"
+  },
+  "floatingWidget": {
+    "title": "DeepChat",
+    "collapse": "Свернуть плавающие сессии",
+    "empty": "Пока нет сессий DeepChat",
+    "executing": "активно",
+    "sessionCount": "{count} сессий",
+    "untitled": "Новый чат",
+    "status": {
+      "inProgress": "В процессе",
+      "done": "Готово",
+      "error": "Ошибка"
+    }
+  },
+  "subagents": {
+    "label": "Субагенты"
+  },
+  "spotlight": {
+    "placeholder": "Искать чаты, агентов, настройки и действия…",
+    "searching": "Поиск…",
+    "emptyTitle": "Совпадений не найдено",
+    "emptyDescription": "Попробуйте другой запрос или откройте недавнюю сессию.",
+    "hints": "↑↓ перемещение · Enter открыть · Esc закрыть · Home/End переход",
+    "kind": {
+      "session": "Сессия",
+      "message": "Сообщение",
+      "agent": "Агент",
+      "setting": "Настройка",
+      "action": "Действие"
+    }
+  },
+  "inlineSearch": {
+    "placeholder": "Поиск по текущему чату",
+    "ariaLabel": "Поиск по текущему чату",
+    "previous": "Предыдущее совпадение",
+    "next": "Следующее совпадение",
+    "close": "Закрыть поиск"
   }
 }

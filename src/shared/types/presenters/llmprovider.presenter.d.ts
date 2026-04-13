@@ -1,7 +1,7 @@
 import { ShowResponse } from 'ollama'
 import type { ChatMessage } from '../core/chat-message'
-import type { LLMAgentEvent } from '../core/agent-events'
 import { ModelType } from '../core/model'
+import type { NewApiEndpointType } from '@shared/model'
 import type { AcpDebugRequest, AcpDebugRunResult, AcpWorkdirInfo } from './legacy.presenters'
 
 /**
@@ -24,6 +24,8 @@ export type RENDERER_MODEL_META = {
   contextLength?: number
   maxTokens?: number
   description?: string
+  supportedEndpointTypes?: NewApiEndpointType[]
+  endpointType?: NewApiEndpointType
 }
 
 export type MODEL_META = {
@@ -41,10 +43,13 @@ export type MODEL_META = {
   contextLength?: number
   maxTokens?: number
   description?: string
+  supportedEndpointTypes?: NewApiEndpointType[]
+  endpointType?: NewApiEndpointType
 }
 
 export type LLM_PROVIDER = {
   id: string
+  capabilityProviderId?: string
   name: string
   apiType: string
   apiKey: string
@@ -56,7 +61,6 @@ export type LLM_PROVIDER = {
   enabledModels?: string[]
   disabledModels?: string[]
   custom?: boolean
-  authMode?: 'apikey' | 'oauth'
   oauthToken?: string
   websites?: {
     official: string
@@ -171,6 +175,37 @@ export interface ModelScopeMcpSyncResult {
   errors: string[]
 }
 
+export type RateLimitQueueSnapshot = {
+  providerId: string
+  qpsLimit: number
+  currentQps: number
+  queueLength: number
+  estimatedWaitTime: number
+}
+
+export type AcpConfigOptionValue = {
+  value: string
+  label: string
+  description?: string | null
+  groupId?: string | null
+  groupLabel?: string | null
+}
+
+export type AcpConfigOption = {
+  id: string
+  label: string
+  description?: string | null
+  type: 'select' | 'boolean'
+  category?: string | null
+  currentValue: string | boolean
+  options?: AcpConfigOptionValue[]
+}
+
+export type AcpConfigState = {
+  source: 'configOptions' | 'legacy'
+  options: AcpConfigOption[]
+}
+
 export interface ILlmProviderPresenter {
   setProviders(provider: LLM_PROVIDER[]): void
   getProviders(): LLM_PROVIDER[]
@@ -190,19 +225,6 @@ export interface ILlmProviderPresenter {
     updates: Partial<MODEL_META>
   ): Promise<boolean>
   getCustomModels(providerId: string): Promise<MODEL_META[]>
-  startStreamCompletion(
-    providerId: string,
-    messages: ChatMessage[],
-    modelId: string,
-    eventId: string,
-    temperature?: number,
-    maxTokens?: number,
-    enabledMcpTools?: string[],
-    thinkingBudget?: number,
-    reasoningEffort?: 'minimal' | 'low' | 'medium' | 'high',
-    verbosity?: 'low' | 'medium' | 'high',
-    conversationId?: string
-  ): AsyncGenerator<LLMAgentEvent, void, unknown>
   generateCompletion(
     providerId: string,
     messages: { role: 'system' | 'user' | 'assistant'; content: string }[],
@@ -251,6 +273,13 @@ export interface ILlmProviderPresenter {
       lastRequestTime: number
     }
   >
+  executeWithRateLimit(
+    providerId: string,
+    options?: {
+      signal?: AbortSignal
+      onQueued?: (snapshot: RateLimitQueueSnapshot) => void
+    }
+  ): Promise<void>
   syncModelScopeMcpServers(
     providerId: string,
     syncOptions?: ModelScopeMcpSyncOptions
@@ -261,15 +290,16 @@ export interface ILlmProviderPresenter {
     messages: ChatMessage[],
     modelId: string,
     temperature?: number,
-    maxTokens?: number
+    maxTokens?: number,
+    options?: { signal?: AbortSignal }
   ): Promise<string>
 
   getAcpWorkdir(conversationId: string, agentId: string): Promise<AcpWorkdirInfo>
   setAcpWorkdir(conversationId: string, agentId: string, workdir: string | null): Promise<void>
-  warmupAcpProcess(agentId: string, workdir: string): Promise<void>
+  warmupAcpProcess(agentId: string, workdir?: string): Promise<void>
   getAcpProcessModes(
     agentId: string,
-    workdir: string
+    workdir?: string
   ): Promise<
     | {
         availableModes?: Array<{ id: string; name: string; description: string }>
@@ -277,6 +307,7 @@ export interface ILlmProviderPresenter {
       }
     | undefined
   >
+  getAcpProcessConfigOptions(agentId: string, workdir?: string): Promise<AcpConfigState | null>
   setAcpPreferredProcessMode(agentId: string, workdir: string, modeId: string): Promise<void>
   setAcpSessionMode(conversationId: string, modeId: string): Promise<void>
   prepareAcpSession(conversationId: string, agentId: string, workdir: string): Promise<void>
@@ -284,6 +315,12 @@ export interface ILlmProviderPresenter {
     current: string
     available: Array<{ id: string; name: string; description: string }>
   } | null>
+  getAcpSessionConfigOptions(conversationId: string): Promise<AcpConfigState | null>
+  setAcpSessionConfigOption(
+    conversationId: string,
+    configId: string,
+    value: string | boolean
+  ): Promise<AcpConfigState | null>
   getAcpSessionCommands(conversationId: string): Promise<
     Array<{
       name: string

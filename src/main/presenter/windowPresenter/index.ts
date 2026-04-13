@@ -8,17 +8,35 @@ import {
   webContents as electronWebContents
 } from 'electron'
 import { join } from 'path'
+import { pathToFileURL } from 'url'
 import icon from '../../../../resources/icon.png?asset' // App icon (macOS/Linux)
 import iconWin from '../../../../resources/icon.ico?asset' // App icon (Windows)
 import { is } from '@electron-toolkit/utils' // Electron utilities
 import { IConfigPresenter, IWindowPresenter } from '@shared/presenter' // Window Presenter interface
+import {
+  resolveSettingsNavigationPath,
+  type SettingsNavigationPayload
+} from '@shared/settingsNavigation'
 import { eventBus } from '@/eventbus' // Event bus
-import { CONFIG_EVENTS, SHORTCUT_EVENTS, SYSTEM_EVENTS, WINDOW_EVENTS } from '@/events' // System/Window/Config/Shortcut event constants
+import {
+  CONFIG_EVENTS,
+  DEEPLINK_EVENTS,
+  SETTINGS_EVENTS,
+  SHORTCUT_EVENTS,
+  SYSTEM_EVENTS,
+  WINDOW_EVENTS
+} from '@/events' // System/Window/Config/Shortcut event constants
 import { presenter } from '../' // Global presenter registry
 import windowStateManager from 'electron-window-state' // Window state manager
 // TrayPresenter is globally managed in main/index.ts, this Presenter is not responsible for its lifecycle
 import { TabPresenter } from '../tabPresenter' // TabPresenter type
 import { FloatingChatWindow } from './FloatingChatWindow' // Floating chat window
+import type { ProviderInstallPreview } from '@shared/providerDeeplink'
+
+type PendingSettingsMessage = {
+  channel: string
+  args: unknown[]
+}
 
 /**
  * Window Presenter, responsible for managing all BrowserWindow instances and their lifecycles.
@@ -36,6 +54,10 @@ export class WindowPresenter implements IWindowPresenter {
   private mainWindowId: number | null = null
   private floatingChatWindow: FloatingChatWindow | null = null
   private settingsWindow: BrowserWindow | null = null
+  private settingsWindowReady = false
+  private pendingSettingsMessages: PendingSettingsMessage[] = []
+  private pendingSettingsProviderInstalls: ProviderInstallPreview[] = []
+  private readonly blockedWindowOpenProtocols = new Set(['about:', 'blob:', 'data:', 'javascript:'])
 
   constructor(configPresenter: IConfigPresenter) {
     this.windows = new Map()
@@ -95,6 +117,10 @@ export class WindowPresenter implements IWindowPresenter {
       }
     })
 
+    ipcMain.on(SETTINGS_EVENTS.READY, (event) => {
+      this.handleSettingsWindowReady(event.sender.id)
+    })
+
     // 监听系统主题更新事件，通知所有窗口 Renderer
     eventBus.on(SYSTEM_EVENTS.SYSTEM_THEME_UPDATED, (isDark: boolean) => {
       console.log('System theme updated, notifying all windows.')
@@ -127,6 +153,30 @@ export class WindowPresenter implements IWindowPresenter {
     eventBus.on(WINDOW_EVENTS.SET_APPLICATION_QUITTING, (data: { isQuitting: boolean }) => {
       console.log(`WindowPresenter: Setting application quitting state to ${data.isQuitting}`)
       this.setApplicationQuitting(data.isQuitting)
+    })
+  }
+
+  private setupManagedWindowOpenHandler(window: BrowserWindow): void {
+    window.webContents.setWindowOpenHandler(({ url }) => {
+      if (!url?.trim()) {
+        return { action: 'deny' }
+      }
+
+      try {
+        const parsedUrl = new URL(url)
+        if (this.blockedWindowOpenProtocols.has(parsedUrl.protocol)) {
+          console.warn(`Blocked attempt to open disallowed URL from managed window: ${url}`)
+          return { action: 'deny' }
+        }
+
+        shell.openExternal(url).catch((error) => {
+          console.error(`Failed to open external URL from managed window: ${url}`, error)
+        })
+      } catch (error) {
+        console.warn(`Blocked attempt to open invalid URL from managed window: ${url}`, error)
+      }
+
+      return { action: 'deny' }
     })
   }
 
@@ -426,6 +476,10 @@ export class WindowPresenter implements IWindowPresenter {
       !this.settingsWindow.isDestroyed() &&
       this.settingsWindow.id === windowId
     ) {
+      if (this.shouldQueueSettingsMessage(channel)) {
+        this.pendingSettingsMessages.push({ channel, args })
+        return true
+      }
       try {
         this.settingsWindow.webContents.send(channel, ...args)
         return true
@@ -520,7 +574,7 @@ export class WindowPresenter implements IWindowPresenter {
 
   public async createBrowserWindow(options?: { x?: number; y?: number }): Promise<number | null> {
     return await this.createManagedWindow({
-      windowType: 'browser',
+      windowType: 'chat',
       x: options?.x,
       y: options?.y
     })
@@ -558,13 +612,11 @@ export class WindowPresenter implements IWindowPresenter {
     x?: number // 初始 X 坐标
     y?: number // 初始 Y 坐标
   }): Promise<number | null> {
-    const windowType = options?.windowType ?? 'chat'
-
     // 根据平台选择图标
     const iconFile = nativeImage.createFromPath(process.platform === 'win32' ? iconWin : icon)
 
-    // 根据窗口类型设置默认宽度
-    const defaultWidth = windowType === 'browser' ? 600 : 800
+    // Standalone browser shell has been removed. All managed windows now use chat shell sizing.
+    const defaultWidth = 800
     const defaultHeight = 620
 
     // 使用窗口状态管理器恢复位置和尺寸
@@ -625,12 +677,9 @@ export class WindowPresenter implements IWindowPresenter {
 
     const windowId = appWindow.id
     this.windows.set(windowId, appWindow) // 将窗口实例存入 Map
-    // For browser windows, register type with TabPresenter
-    if (windowType === 'browser') {
-      ;(presenter.tabPresenter as TabPresenter).setWindowType(windowId, windowType)
-    }
 
     managedWindowState.manage(appWindow) // 管理窗口状态
+    this.setupManagedWindowOpenHandler(appWindow)
 
     // 应用内容保护设置
     const contentProtectionEnabled = this.configPresenter.getContentProtectionEnabled()
@@ -647,15 +696,12 @@ export class WindowPresenter implements IWindowPresenter {
     appWindow.on('ready-to-show', () => {
       console.log(`Window ${windowId} is ready to show.`)
       if (!appWindow.isDestroyed()) {
-        // For browser windows, don't auto-show/focus to prevent stealing focus from chat windows
-        // Browser windows should only be shown when explicitly requested by user (e.g., clicking browser button)
-        const shouldAutoShow = windowType !== 'browser' || options?.forMovedTab === true
-
-        if (shouldAutoShow) {
-          appWindow.show()
-          appWindow.focus()
-        }
-        eventBus.sendToMain(WINDOW_EVENTS.WINDOW_CREATED, windowId)
+        appWindow.show()
+        appWindow.focus()
+        eventBus.sendToMain(WINDOW_EVENTS.WINDOW_CREATED, {
+          windowId,
+          isMainWindow: windowId === this.mainWindowId
+        })
       } else {
         console.warn(`Window ${windowId} was destroyed before ready-to-show.`)
       }
@@ -842,89 +888,19 @@ export class WindowPresenter implements IWindowPresenter {
     })
 
     // --- 加载 Renderer HTML 文件 ---
-    if (windowType === 'chat') {
-      // Chat windows load the main renderer directly with #/chat hash route
-      if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
-        console.log(
-          `Loading main renderer URL in dev mode: ${process.env['ELECTRON_RENDERER_URL']}#/chat`
-        )
-        appWindow.loadURL(process.env['ELECTRON_RENDERER_URL'] + '#/chat')
-      } else {
-        console.log(
-          `Loading packaged main renderer file: ${join(__dirname, '../renderer/index.html')}`
-        )
-        appWindow.loadFile(join(__dirname, '../renderer/index.html'), { hash: '/chat' })
-      }
+    // Standalone browser renderer has been removed. All windows load the main chat shell.
+    if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
+      console.log(
+        `Loading main renderer URL in dev mode: ${process.env['ELECTRON_RENDERER_URL']}#/chat`
+      )
+      appWindow.loadURL(process.env['ELECTRON_RENDERER_URL'] + '#/chat')
     } else {
-      // Browser windows load the dedicated browser renderer
-      if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
-        console.log(
-          `Loading renderer URL in dev mode: ${process.env['ELECTRON_RENDERER_URL']}/browser/index.html`
-        )
-        appWindow.loadURL(process.env['ELECTRON_RENDERER_URL'] + '/browser/index.html')
-      } else {
-        console.log(
-          `Loading packaged renderer file: ${join(__dirname, '../renderer/browser/index.html')}`
-        )
-        appWindow.loadFile(join(__dirname, '../renderer/browser/index.html'))
-      }
-    }
-
-    // --- 处理 browser 窗口的初始标签页创建或激活 ---
-    // Only browser windows need initial tab / activateTab handling via TabPresenter
-    if (windowType === 'browser') {
-      if (options?.initialTab) {
-        appWindow.webContents.once('did-finish-load', async () => {
-          console.log(`Window ${windowId} did-finish-load, checking for initial tab creation.`)
-          if (appWindow.isDestroyed()) {
-            console.warn(
-              `Window ${windowId} was destroyed before did-finish-load callback, cannot create initial tab.`
-            )
-            return
-          }
-          appWindow.focus()
-          try {
-            console.log(`Creating initial browser view, URL: ${options.initialTab!.url}`)
-            const viewId = await (presenter.tabPresenter as TabPresenter).createTab(
-              windowId,
-              options.initialTab!.url,
-              { active: true }
-            )
-            if (viewId === null) {
-              console.error(`Failed to create initial browser view in new window ${windowId}.`)
-            } else {
-              console.log(`Created initial browser view ${viewId} in window ${windowId}.`)
-            }
-          } catch (error) {
-            console.error(`Error creating initial browser view:`, error)
-          }
-        })
-      }
-
-      if (options?.activateTabId !== undefined && !options?.forMovedTab) {
-        appWindow.webContents.once('did-finish-load', async () => {
-          console.log(
-            `Window ${windowId} did-finish-load, attempting to activate tab ${options.activateTabId}.`
-          )
-          if (appWindow.isDestroyed()) {
-            console.warn(
-              `Window ${windowId} was destroyed before did-finish-load callback, cannot activate tab ${options.activateTabId}.`
-            )
-            return
-          }
-          try {
-            await (presenter.tabPresenter as TabPresenter).switchTab(
-              options.activateTabId as number
-            )
-            console.log(`Requested to switch to tab ${options.activateTabId}.`)
-          } catch (error) {
-            console.error(
-              `Failed to activate tab ${options.activateTabId} after window ${windowId} load:`,
-              error
-            )
-          }
-        })
-      }
+      console.log(
+        `Loading packaged main renderer file: ${join(__dirname, '../renderer/index.html')}`
+      )
+      appWindow.loadFile(join(__dirname, '../renderer/index.html'), {
+        hash: '/chat'
+      })
     }
 
     // DevTools 不再自动打开，需要手动通过菜单或快捷键打开
@@ -1244,12 +1220,17 @@ export class WindowPresenter implements IWindowPresenter {
   /**
    * Create or show Settings Window (singleton pattern)
    */
-  public async createSettingsWindow(): Promise<number | null> {
+  public async createSettingsWindow(
+    navigation?: SettingsNavigationPayload
+  ): Promise<number | null> {
     // If settings window already exists, just show and focus it
     if (this.settingsWindow && !this.settingsWindow.isDestroyed()) {
       console.log('Settings window already exists, showing and focusing.')
       this.settingsWindow.show()
       this.settingsWindow.focus()
+      if (navigation) {
+        this.sendToWindow(this.settingsWindow.id, SETTINGS_EVENTS.NAVIGATE, navigation)
+      }
       return this.settingsWindow.id
     }
 
@@ -1261,8 +1242,8 @@ export class WindowPresenter implements IWindowPresenter {
     // Initialize window state manager to remember position and size
     const settingsWindowState = windowStateManager({
       file: 'settings-window-state.json',
-      defaultWidth: 900,
-      defaultHeight: 600
+      defaultWidth: 1300,
+      defaultHeight: 800
     })
 
     // Create Settings Window with state persistence
@@ -1301,6 +1282,7 @@ export class WindowPresenter implements IWindowPresenter {
     }
 
     this.settingsWindow = settingsWindow
+    this.resetSettingsWindowState()
     const windowId = settingsWindow.id
 
     // Manage window state to track position and size changes
@@ -1337,24 +1319,43 @@ export class WindowPresenter implements IWindowPresenter {
       }
     })
 
+    settingsWindow.webContents.on('did-start-navigation', (details) => {
+      this.handleSettingsWindowNavigationStart(
+        windowId,
+        details.isMainFrame,
+        details.isSameDocument
+      )
+    })
+
     settingsWindow.on('closed', () => {
       console.log(`Settings window ${windowId} closed.`)
       // Unmanage window state when window is closed
       settingsWindowState.unmanage()
       this.settingsWindow = null
+      this.resetSettingsWindowState(true)
     })
 
     // Load settings renderer HTML
+    const initialNavigationPath = navigation
+      ? resolveSettingsNavigationPath(navigation.routeName, navigation.params)
+      : null
+
     if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
-      console.log(
-        `Loading settings renderer URL in dev mode: ${process.env['ELECTRON_RENDERER_URL']}/settings/index.html`
-      )
-      await settingsWindow.loadURL(process.env['ELECTRON_RENDERER_URL'] + '/settings/index.html')
+      const settingsUrl = new URL('/settings/index.html', process.env['ELECTRON_RENDERER_URL'])
+      if (initialNavigationPath) {
+        settingsUrl.hash = initialNavigationPath
+      }
+      console.log(`Loading settings renderer URL in dev mode: ${settingsUrl.toString()}`)
+      await settingsWindow.loadURL(settingsUrl.toString())
     } else {
-      console.log(
-        `Loading packaged settings renderer file: ${join(__dirname, '../renderer/settings/index.html')}`
-      )
-      await settingsWindow.loadFile(join(__dirname, '../renderer/settings/index.html'))
+      const packagedSettingsUrl = pathToFileURL(
+        join(__dirname, '../renderer/settings/index.html')
+      ).toString()
+      const targetUrl = initialNavigationPath
+        ? `${packagedSettingsUrl}#${initialNavigationPath}`
+        : packagedSettingsUrl
+      console.log(`Loading packaged settings renderer URL: ${targetUrl}`)
+      await settingsWindow.loadURL(targetUrl)
     }
 
     // Open DevTools in development mode
@@ -1380,6 +1381,19 @@ export class WindowPresenter implements IWindowPresenter {
     return null
   }
 
+  public setPendingSettingsProviderInstall(preview: ProviderInstallPreview): void {
+    this.pendingSettingsProviderInstalls.push(this.clonePendingSettingsProviderInstall(preview))
+  }
+
+  public consumePendingSettingsProviderInstall(): ProviderInstallPreview | null {
+    const preview = this.pendingSettingsProviderInstalls.shift()
+    if (!preview) {
+      return null
+    }
+
+    return this.clonePendingSettingsProviderInstall(preview)
+  }
+
   /**
    * Close Settings Window if it exists
    */
@@ -1397,6 +1411,82 @@ export class WindowPresenter implements IWindowPresenter {
    */
   public isSettingsWindowOpen(): boolean {
     return this.settingsWindow !== null && !this.settingsWindow.isDestroyed()
+  }
+
+  private shouldQueueSettingsMessage(channel: string): boolean {
+    return (
+      !this.settingsWindowReady &&
+      (channel.startsWith('settings:') || channel === DEEPLINK_EVENTS.MCP_INSTALL)
+    )
+  }
+
+  private handleSettingsWindowReady(senderWebContentsId: number): void {
+    if (
+      !this.settingsWindow ||
+      this.settingsWindow.isDestroyed() ||
+      this.settingsWindow.webContents.isDestroyed() ||
+      this.settingsWindow.webContents.id !== senderWebContentsId
+    ) {
+      return
+    }
+
+    this.settingsWindowReady = true
+    this.flushPendingSettingsMessages()
+  }
+
+  private handleSettingsWindowNavigationStart(
+    windowId: number,
+    isMainFrame: boolean,
+    isSameDocument: boolean
+  ): void {
+    if (!isMainFrame || isSameDocument || this.settingsWindow?.id !== windowId) {
+      return
+    }
+
+    this.settingsWindowReady = false
+  }
+
+  private flushPendingSettingsMessages(): void {
+    if (
+      !this.settingsWindow ||
+      this.settingsWindow.isDestroyed() ||
+      this.settingsWindow.webContents.isDestroyed() ||
+      !this.settingsWindowReady ||
+      this.pendingSettingsMessages.length === 0
+    ) {
+      return
+    }
+
+    const pending = [...this.pendingSettingsMessages]
+    this.pendingSettingsMessages = []
+    pending.forEach(({ channel, args }) => {
+      try {
+        this.settingsWindow?.webContents.send(channel, ...args)
+      } catch (error) {
+        console.error(`Error flushing settings message "${channel}":`, error)
+      }
+    })
+  }
+
+  private resetSettingsWindowState(clearQueue = false): void {
+    this.settingsWindowReady = false
+    if (clearQueue) {
+      this.pendingSettingsMessages = []
+      this.clearPendingSettingsProviderInstalls()
+    }
+  }
+
+  private clonePendingSettingsProviderInstall(
+    preview: ProviderInstallPreview
+  ): ProviderInstallPreview {
+    return { ...preview }
+  }
+
+  private clearPendingSettingsProviderInstalls(): void {
+    this.pendingSettingsProviderInstalls.forEach((preview) => {
+      preview.apiKey = ''
+    })
+    this.pendingSettingsProviderInstalls = []
   }
 
   public isApplicationQuitting(): boolean {

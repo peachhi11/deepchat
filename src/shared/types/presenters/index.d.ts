@@ -5,10 +5,14 @@
 
 // LLM Provider types
 export type {
+  AcpConfigOption,
+  AcpConfigOptionValue,
+  AcpConfigState,
   ILlmProviderPresenter,
   LLM_PROVIDER,
   LLM_PROVIDER_BASE,
   MODEL_META,
+  RateLimitQueueSnapshot,
   RENDERER_MODEL_META,
   LLM_EMBEDDING_ATTRS,
   KeyStatus,
@@ -67,18 +71,46 @@ export type {
   WorkspaceGitFileChange,
   WorkspaceGitState,
   WorkspaceGitDiff,
+  WorkspaceInvalidationKind,
+  WorkspaceInvalidationSource,
+  WorkspaceInvalidationEvent,
+  ResolveMarkdownLinkedFileInput,
+  WorkspaceLinkedFileResolution,
   IWorkspacePresenter
 } from './workspace'
 
 // Tool Presenter types
 export type { IToolPresenter } from './tool.presenter'
 
-// Agent Presenter types
-export type { IAgentPresenter } from './agent.presenter'
-
 // New agent architecture types
-export type { INewAgentPresenter } from './new-agent.presenter'
+export type {
+  IAgentSessionPresenter,
+  HistorySearchHit,
+  HistorySearchMessageHit,
+  HistorySearchOptions,
+  HistorySearchSessionHit
+} from './agent-session.presenter'
 export type { IProjectPresenter } from './project.presenter'
+export type {
+  FeishuPairingSnapshot,
+  FeishuRemoteBindingSummary,
+  FeishuRemoteSettings,
+  FeishuRemoteStatus,
+  IRemoteControlPresenter,
+  RemoteBindingKind,
+  RemoteBindingSummary,
+  RemoteChannel,
+  RemoteChannelSettings,
+  RemoteChannelStatus,
+  RemotePairingSnapshot,
+  RemoteRuntimeState,
+  TelegramHookSettings,
+  TelegramPairingSnapshot,
+  TelegramRemoteBindingSummary,
+  TelegramRemoteSettings,
+  TelegramRemoteStatus,
+  TelegramStreamMode
+} from './remote-control.presenter'
 
 // Re-export legacy types temporarily for compatibility
 export * from './legacy.presenters'

@@ -3,7 +3,14 @@
  * Types for the unified tool routing presenter
  */
 
-import type { MCPToolDefinition, MCPToolCall, MCPToolResponse } from './legacy.presenters'
+import type { MCPToolDefinition, MCPToolCall, MCPToolResponse } from '../core/mcp'
+
+export interface AgentToolProgressUpdate {
+  kind: 'subagent_orchestrator'
+  toolCallId: string
+  responseMarkdown: string
+  progressJson: string
+}
 
 /**
  * Tool Presenter interface
@@ -16,6 +23,7 @@ export interface IToolPresenter {
    */
   getAllToolDefinitions(context: {
     enabledMcpTools?: string[]
+    disabledAgentTools?: string[]
     chatMode?: 'agent' | 'acp agent'
     supportsVision?: boolean
     agentWorkspacePath?: string | null
@@ -26,7 +34,13 @@ export interface IToolPresenter {
    * Call a tool, routing to the appropriate source
    * @param request Tool call request
    */
-  callTool(request: MCPToolCall): Promise<{ content: unknown; rawData: MCPToolResponse }>
+  callTool(
+    request: MCPToolCall,
+    options?: {
+      onProgress?: (update: AgentToolProgressUpdate) => void
+      signal?: AbortSignal
+    }
+  ): Promise<{ content: unknown; rawData: MCPToolResponse }>
 
   /**
    * Pre-check tool permission without executing the tool.
@@ -60,5 +74,8 @@ export interface IToolPresenter {
   /**
    * Build system prompt section for tool-related behavior.
    */
-  buildToolSystemPrompt(context: { conversationId?: string }): string
+  buildToolSystemPrompt(context: {
+    conversationId?: string
+    toolDefinitions?: MCPToolDefinition[]
+  }): string
 }

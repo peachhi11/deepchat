@@ -19,9 +19,7 @@ import {
   ISQLitePresenter,
   ISyncPresenter,
   ITabPresenter,
-  ISessionPresenter,
   IConversationExporter,
-  IAgentPresenter,
   IUpgradePresenter,
   IWindowPresenter,
   IWorkspacePresenter,
@@ -29,8 +27,9 @@ import {
   IYoBrowserPresenter,
   ISkillPresenter,
   ISkillSyncPresenter,
-  INewAgentPresenter,
-  IProjectPresenter
+  IAgentSessionPresenter,
+  IProjectPresenter,
+  IRemoteControlPresenter
 } from '@shared/presenter'
 import { eventBus } from '@/eventbus'
 import { LLMProviderPresenter } from './llmProviderPresenter'
@@ -57,17 +56,24 @@ import {
   FilePermissionService,
   SettingsPermissionService
 } from './permission'
-import { AgentPresenter } from './agentPresenter'
-import { SessionManager } from './agentPresenter/session/sessionManager'
+import type { AgentToolRuntimePort } from './toolPresenter/runtimePorts'
 
 import { ConversationExporterService } from './exporter'
 import { SkillPresenter } from './skillPresenter'
+import type { SkillSessionStatePort } from './skillPresenter'
 import { SkillSyncPresenter } from './skillSyncPresenter'
 import { HooksNotificationsService } from './hooksNotifications'
 import { NewSessionHooksBridge } from './hooksNotifications/newSessionBridge'
-import { NewAgentPresenter } from './newAgentPresenter'
-import { DeepChatAgentPresenter } from './deepchatAgentPresenter'
+import { AgentSessionPresenter } from './agentSessionPresenter'
+import { AgentRuntimePresenter } from './agentRuntimePresenter'
 import { ProjectPresenter } from './projectPresenter'
+import { RemoteControlPresenter } from './remoteControlPresenter'
+import type { RemoteControlPresenterLike } from './remoteControlPresenter/interface'
+import { AgentRepository } from './agentRepository'
+import type { SQLitePresenter } from './sqlitePresenter'
+import { normalizeDeepChatSubagentSlots } from '@shared/lib/deepchatSubagents'
+import { subscribeDeepChatInternalSessionUpdates } from './agentRuntimePresenter/internalSessionEvents'
+import type { ConfigQueryPort, SessionRuntimePort } from './runtimePorts'
 
 // IPC调用上下文接口
 interface IPCCallContext {
@@ -85,16 +91,61 @@ interface IPCCallContext {
 export class Presenter implements IPresenter {
   // 私有静态实例
   private static instance: Presenter
+  static readonly DISPATCHABLE_PRESENTERS = new Set<keyof IPresenter>([
+    'windowPresenter',
+    'sqlitePresenter',
+    'llmproviderPresenter',
+    'configPresenter',
+    'exporter',
+    'devicePresenter',
+    'upgradePresenter',
+    'shortcutPresenter',
+    'filePresenter',
+    'mcpPresenter',
+    'syncPresenter',
+    'deeplinkPresenter',
+    'notificationPresenter',
+    'tabPresenter',
+    'yoBrowserPresenter',
+    'oauthPresenter',
+    'dialogPresenter',
+    'knowledgePresenter',
+    'workspacePresenter',
+    'toolPresenter',
+    'skillPresenter',
+    'skillSyncPresenter',
+    'agentSessionPresenter',
+    'projectPresenter'
+  ])
+
+  static readonly REMOTE_CONTROL_METHODS = new Set<keyof IRemoteControlPresenter>([
+    'getChannelSettings',
+    'saveChannelSettings',
+    'getChannelStatus',
+    'getChannelBindings',
+    'removeChannelBinding',
+    'getChannelPairingSnapshot',
+    'createChannelPairCode',
+    'clearChannelPairCode',
+    'clearChannelBindings',
+    'getTelegramSettings',
+    'saveTelegramSettings',
+    'getTelegramStatus',
+    'getTelegramBindings',
+    'removeTelegramBinding',
+    'getTelegramPairingSnapshot',
+    'createTelegramPairCode',
+    'clearTelegramPairCode',
+    'clearTelegramBindings',
+    'testTelegramHookNotification'
+  ])
 
   windowPresenter: IWindowPresenter
   sqlitePresenter: ISQLitePresenter
   llmproviderPresenter: ILlmProviderPresenter
   configPresenter: IConfigPresenter
-  sessionPresenter: ISessionPresenter
 
   exporter: IConversationExporter
-  agentPresenter: IAgentPresenter & ISessionPresenter
-  sessionManager: SessionManager
   devicePresenter: IDevicePresenter
   upgradePresenter: IUpgradePresenter
   shortcutPresenter: IShortcutPresenter
@@ -115,12 +166,16 @@ export class Presenter implements IPresenter {
   lifecycleManager: ILifecycleManager
   skillPresenter: ISkillPresenter
   skillSyncPresenter: ISkillSyncPresenter
-  newAgentPresenter: INewAgentPresenter
+  agentSessionPresenter: IAgentSessionPresenter
   projectPresenter: IProjectPresenter
   hooksNotifications: HooksNotificationsService
   commandPermissionService: CommandPermissionService
   filePermissionService: FilePermissionService
   settingsPermissionService: SettingsPermissionService
+  private sessionMessageManager: MessageManager
+  private sessionPresenterInternal?: SessionPresenter
+  #remoteControlPresenter: RemoteControlPresenterLike
+  readonly #remoteControlBridge: IRemoteControlPresenter
 
   private constructor(lifecycleManager: ILifecycleManager) {
     // Store lifecycle manager reference for component access
@@ -129,42 +184,35 @@ export class Presenter implements IPresenter {
     const context = lifecycleManager.getLifecycleContext()
     this.configPresenter = context.config as IConfigPresenter
     this.sqlitePresenter = context.database as ISQLitePresenter
+    const agentRepository = new AgentRepository(this.sqlitePresenter as unknown as SQLitePresenter)
+    ;(
+      this.configPresenter as IConfigPresenter & {
+        setAgentRepository?: (repository: AgentRepository) => void
+      }
+    ).setAgentRepository?.(agentRepository)
 
     // 初始化各个 Presenter 实例及其依赖
     this.windowPresenter = new WindowPresenter(this.configPresenter)
     this.tabPresenter = new TabPresenter(this.windowPresenter)
-    this.llmproviderPresenter = new LLMProviderPresenter(this.configPresenter, this.sqlitePresenter)
+    this.llmproviderPresenter = new LLMProviderPresenter(
+      this.configPresenter,
+      this.sqlitePresenter,
+      {
+        getNpmRegistry: () => this.mcpPresenter.getNpmRegistry?.() ?? null,
+        getUvRegistry: () => this.mcpPresenter.getUvRegistry?.() ?? null
+      }
+    )
     const commandPermissionHandler = new CommandPermissionService()
     this.commandPermissionService = commandPermissionHandler
     this.filePermissionService = new FilePermissionService()
     this.settingsPermissionService = new SettingsPermissionService()
     const messageManager = new MessageManager(this.sqlitePresenter)
+    this.sessionMessageManager = messageManager
     this.devicePresenter = new DevicePresenter()
     this.exporter = new ConversationExporterService({
       sqlitePresenter: this.sqlitePresenter,
       configPresenter: this.configPresenter
     })
-    this.sessionPresenter = new SessionPresenter({
-      messageManager,
-      sqlitePresenter: this.sqlitePresenter,
-      llmProviderPresenter: this.llmproviderPresenter,
-      configPresenter: this.configPresenter,
-      exporter: this.exporter,
-      commandPermissionService: commandPermissionHandler
-    })
-    this.sessionManager = new SessionManager({
-      configPresenter: this.configPresenter,
-      sessionPresenter: this.sessionPresenter
-    })
-    this.agentPresenter = new AgentPresenter({
-      sessionPresenter: this.sessionPresenter,
-      sessionManager: this.sessionManager,
-      sqlitePresenter: this.sqlitePresenter,
-      llmProviderPresenter: this.llmproviderPresenter,
-      configPresenter: this.configPresenter,
-      commandPermissionService: commandPermissionHandler,
-      messageManager
-    }) as unknown as IAgentPresenter & ISessionPresenter
     this.mcpPresenter = new McpPresenter(this.configPresenter)
     this.upgradePresenter = new UpgradePresenter(this.configPresenter)
     this.shortcutPresenter = new ShortcutPresenter(this.configPresenter)
@@ -189,16 +237,165 @@ export class Presenter implements IPresenter {
     // Initialize generic Workspace presenter (for all Agent modes)
     this.workspacePresenter = new WorkspacePresenter(this.filePresenter)
 
+    const agentToolRuntime: AgentToolRuntimePort = {
+      resolveConversationWorkdir: async (conversationId) => {
+        try {
+          const session = await this.agentSessionPresenter?.getSession(conversationId)
+          const normalized = session?.projectDir?.trim()
+          if (normalized) {
+            return normalized
+          }
+        } catch (error) {
+          console.warn('[Presenter] Failed to resolve new session workdir:', {
+            conversationId,
+            error
+          })
+        }
+
+        return null
+      },
+      resolveConversationSessionInfo: async (conversationId) => {
+        const session = await this.agentSessionPresenter?.getSession(conversationId)
+        if (!session) {
+          return null
+        }
+
+        const agent = await this.configPresenter.getAgent(session.agentId)
+        const agentType = await this.configPresenter.getAgentType(session.agentId)
+        const permissionMode =
+          typeof this.agentSessionPresenter?.getPermissionMode === 'function'
+            ? await this.agentSessionPresenter.getPermissionMode(session.id)
+            : 'full_access'
+        const generationSettings =
+          typeof this.agentSessionPresenter?.getSessionGenerationSettings === 'function'
+            ? await this.agentSessionPresenter.getSessionGenerationSettings(session.id)
+            : null
+        const disabledAgentTools =
+          typeof this.agentSessionPresenter?.getSessionDisabledAgentTools === 'function'
+            ? await this.agentSessionPresenter.getSessionDisabledAgentTools(session.id)
+            : []
+        const activeSkills = await this.skillPresenter.getActiveSkills(session.id)
+        const availableSubagentSlots =
+          agentType === 'deepchat' && session.sessionKind === 'regular'
+            ? normalizeDeepChatSubagentSlots(
+                (await this.configPresenter.resolveDeepChatAgentConfig(session.agentId)).subagents
+              )
+            : []
+
+        return {
+          sessionId: session.id,
+          agentId: session.agentId,
+          agentName: agent?.name?.trim() || session.agentId,
+          agentType,
+          providerId: session.providerId,
+          modelId: session.modelId,
+          projectDir: session.projectDir ?? null,
+          permissionMode,
+          generationSettings,
+          disabledAgentTools,
+          activeSkills,
+          sessionKind: session.sessionKind,
+          parentSessionId: session.parentSessionId ?? null,
+          subagentEnabled: session.subagentEnabled,
+          subagentMeta: session.subagentMeta ?? null,
+          availableSubagentSlots
+        }
+      },
+      createSubagentSession: async (input) => {
+        const agentSessionPresenter = this.agentSessionPresenter as IAgentSessionPresenter & {
+          createSubagentSession?: (createInput: typeof input) => Promise<{
+            id: string
+          } | null>
+        }
+        const created = await agentSessionPresenter.createSubagentSession?.(input)
+        if (!created?.id) {
+          return null
+        }
+
+        return await agentToolRuntime.resolveConversationSessionInfo(created.id)
+      },
+      sendConversationMessage: async (conversationId, content) => {
+        await this.agentSessionPresenter.sendMessage(conversationId, content)
+      },
+      cancelConversation: async (conversationId) => {
+        await this.agentSessionPresenter.cancelGeneration(conversationId)
+      },
+      subscribeDeepChatSessionUpdates: (listener) =>
+        subscribeDeepChatInternalSessionUpdates(listener),
+      getSkillPresenter: () => this.skillPresenter,
+      getYoBrowserToolHandler: () => this.yoBrowserPresenter.toolHandler,
+      getFilePresenter: () => ({
+        getMimeType: (filePath) => this.filePresenter.getMimeType(filePath),
+        prepareFileCompletely: (absPath, typeInfo, contentType) =>
+          this.filePresenter.prepareFileCompletely(absPath, typeInfo, contentType)
+      }),
+      getLlmProviderPresenter: () => ({
+        executeWithRateLimit: (providerId, options) =>
+          this.llmproviderPresenter.executeWithRateLimit(providerId, options),
+        generateCompletionStandalone: (
+          providerId,
+          messages,
+          modelId,
+          temperature,
+          maxTokens,
+          options
+        ) =>
+          this.llmproviderPresenter.generateCompletionStandalone(
+            providerId,
+            messages,
+            modelId,
+            temperature,
+            maxTokens,
+            options
+          )
+      }),
+      createSettingsWindow: () => this.windowPresenter.createSettingsWindow(),
+      sendToWindow: (windowId, channel, ...args) =>
+        this.windowPresenter.sendToWindow(windowId, channel, ...args),
+      getApprovedFilePaths: (conversationId) =>
+        this.filePermissionService.getApprovedPaths(conversationId),
+      consumeSettingsApproval: (conversationId, toolName) =>
+        this.settingsPermissionService.consumeApproval(conversationId, toolName)
+    }
+
     // Initialize unified Tool presenter (for routing MCP and Agent tools)
     this.toolPresenter = new ToolPresenter({
       mcpPresenter: this.mcpPresenter,
-      yoBrowserPresenter: this.yoBrowserPresenter,
       configPresenter: this.configPresenter,
-      commandPermissionHandler
+      commandPermissionHandler,
+      agentToolRuntime
     })
 
+    const skillSessionStatePort: SkillSessionStatePort = {
+      hasNewSession: async (conversationId) => {
+        try {
+          return Boolean(await this.agentSessionPresenter?.getSession(conversationId))
+        } catch {
+          return false
+        }
+      },
+      getPersistedNewSessionSkills: (conversationId) =>
+        (
+          this.sqlitePresenter as unknown as import('./sqlitePresenter').SQLitePresenter
+        ).newSessionsTable?.getActiveSkills(conversationId) ?? [],
+      setPersistedNewSessionSkills: (conversationId, skills) => {
+        const sqlitePresenter = this
+          .sqlitePresenter as unknown as import('./sqlitePresenter').SQLitePresenter
+        sqlitePresenter.newSessionsTable?.updateActiveSkills(conversationId, skills)
+        sqlitePresenter.newEnvironmentsTable?.syncForSession(conversationId)
+      },
+      repairImportedLegacySessionSkills: async (conversationId) => {
+        const agentSessionPresenter = this.agentSessionPresenter as IAgentSessionPresenter & {
+          repairImportedLegacySessionSkills?: (sessionId: string) => Promise<string[]>
+        }
+        return (
+          (await agentSessionPresenter.repairImportedLegacySessionSkills?.(conversationId)) ?? []
+        )
+      }
+    }
+
     // Initialize Skill presenter
-    this.skillPresenter = new SkillPresenter(this.configPresenter)
+    this.skillPresenter = new SkillPresenter(this.configPresenter, skillSessionStatePort)
 
     // Initialize Skill Sync presenter
     this.skillSyncPresenter = new SkillSyncPresenter(this.skillPresenter, this.configPresenter)
@@ -209,34 +406,141 @@ export class Presenter implements IPresenter {
       getMessage: async () => null
     })
     const newSessionHooksBridge = new NewSessionHooksBridge(this.hooksNotifications)
+    const configQueryPort: ConfigQueryPort = {
+      getProviderModels: (providerId) => this.configPresenter.getProviderModels?.(providerId) ?? [],
+      getCustomModels: (providerId) => this.configPresenter.getCustomModels?.(providerId) ?? [],
+      getAgentType: async (agentId) => await this.configPresenter.getAgentType(agentId)
+    }
+    const sessionRuntimePort: SessionRuntimePort = {
+      refreshSessionUi: () => {
+        try {
+          void this.floatingButtonPresenter.refreshWidgetState()
+        } catch (error) {
+          console.warn('[Presenter] Failed to refresh floating widget state:', error)
+        }
+      },
+      clearSessionPermissions: (sessionId) => {
+        this.commandPermissionService.clearConversation(sessionId)
+        this.filePermissionService.clearConversation(sessionId)
+        this.settingsPermissionService.clearConversation(sessionId)
+      },
+      approvePermission: async (sessionId, permission) => {
+        const permissionType = permission.permissionType
+        const serverName = permission.serverName || ''
+        const toolName = permission.toolName || ''
+
+        if (permissionType === 'command') {
+          const command = permission.command || permission.commandInfo?.command || ''
+          const signature =
+            permission.commandSignature ||
+            permission.commandInfo?.signature ||
+            (command ? this.commandPermissionService.extractCommandSignature(command) : '')
+          if (signature) {
+            this.commandPermissionService.approve(sessionId, signature, false)
+          }
+          return
+        }
+
+        if (
+          serverName === 'agent-filesystem' &&
+          Array.isArray(permission.paths) &&
+          permission.paths.length > 0
+        ) {
+          this.filePermissionService.approve(sessionId, permission.paths, false)
+          return
+        }
+
+        if (serverName === 'deepchat-settings' && toolName) {
+          this.settingsPermissionService.approve(sessionId, toolName, false)
+          return
+        }
+
+        if (
+          serverName &&
+          (permissionType === 'read' || permissionType === 'write' || permissionType === 'all')
+        ) {
+          await this.mcpPresenter.grantPermission(serverName, permissionType, false, sessionId)
+        }
+      }
+    }
 
     // Initialize new agent architecture presenters
-    const deepchatAgentPresenter = new DeepChatAgentPresenter(
+    const agentRuntimePresenter = new AgentRuntimePresenter(
       this.llmproviderPresenter as unknown as ILlmProviderPresenter,
       this.configPresenter,
       this.sqlitePresenter as unknown as import('./sqlitePresenter').SQLitePresenter,
       this.toolPresenter,
-      newSessionHooksBridge
+      newSessionHooksBridge,
+      {
+        configQueryPort,
+        sessionRuntimePort,
+        skillPresenter: this.skillPresenter
+      }
     )
-    this.newAgentPresenter = new NewAgentPresenter(
-      deepchatAgentPresenter,
+    this.agentSessionPresenter = new AgentSessionPresenter(
+      agentRuntimePresenter,
       this.llmproviderPresenter as unknown as ILlmProviderPresenter,
       this.configPresenter,
       this.sqlitePresenter as unknown as import('./sqlitePresenter').SQLitePresenter,
-      this.skillPresenter
+      this.skillPresenter,
+      sessionRuntimePort
     )
     this.projectPresenter = new ProjectPresenter(
       this.sqlitePresenter as unknown as import('./sqlitePresenter').SQLitePresenter,
       this.devicePresenter
     )
+    this.#remoteControlPresenter = new RemoteControlPresenter({
+      configPresenter: this.configPresenter,
+      agentSessionPresenter: this.agentSessionPresenter,
+      agentRuntimePresenter,
+      windowPresenter: this.windowPresenter,
+      tabPresenter: this.tabPresenter,
+      getHooksNotificationsConfig: () => this.configPresenter.getHooksNotificationsConfig(),
+      setHooksNotificationsConfig: (config) =>
+        this.configPresenter.setHooksNotificationsConfig(config),
+      testTelegramHookNotification: () => this.configPresenter.testTelegramNotification()
+    })
+    this.#remoteControlBridge = this.#remoteControlPresenter
 
-    // Update hooksNotifications with actual dependencies now that newAgentPresenter is ready
+    // Update hooksNotifications with actual dependencies now that agentSessionPresenter is ready
     this.hooksNotifications = new HooksNotificationsService(this.configPresenter, {
-      getSession: this.newAgentPresenter.getSession.bind(this.newAgentPresenter),
-      getMessage: this.newAgentPresenter.getMessage.bind(this.newAgentPresenter)
+      getSession: this.agentSessionPresenter.getSession.bind(this.agentSessionPresenter),
+      getMessage: this.agentSessionPresenter.getMessage.bind(this.agentSessionPresenter)
     })
 
     this.setupEventBus() // 设置事件总线监听
+  }
+
+  getActiveConversationIdSync(webContentsId: number): string | null {
+    return this.sessionPresenterInternal?.getActiveConversationIdSync(webContentsId) ?? null
+  }
+
+  async broadcastConversationThreadListUpdate(): Promise<void> {
+    await this.getSessionPresenter().broadcastThreadListUpdate()
+  }
+
+  async cleanupConversationRuntimeArtifacts(conversationId: string): Promise<void> {
+    try {
+      await this.llmproviderPresenter.clearAcpSession(conversationId)
+    } catch (error) {
+      console.warn('[Presenter] Failed to clear ACP session:', error)
+    }
+  }
+
+  private getSessionPresenter(): SessionPresenter {
+    if (!this.sessionPresenterInternal) {
+      this.sessionPresenterInternal = new SessionPresenter({
+        messageManager: this.sessionMessageManager,
+        sqlitePresenter: this.sqlitePresenter,
+        llmProviderPresenter: this.llmproviderPresenter,
+        configPresenter: this.configPresenter,
+        exporter: this.exporter,
+        commandPermissionService: this.commandPermissionService
+      })
+    }
+
+    this.sessionPresenterInternal.initializeLegacyRuntime()
+    return this.sessionPresenterInternal
   }
 
   public static getInstance(lifecycleManager: ILifecycleManager): Presenter {
@@ -299,6 +603,9 @@ export class Presenter implements IPresenter {
 
     // 初始化 Skills 系统
     this.initializeSkills()
+
+    // Initialize remote control runtime
+    void this.initializeRemoteControl()
   }
 
   // 初始化悬浮按钮
@@ -338,6 +645,26 @@ export class Presenter implements IPresenter {
     }
   }
 
+  private async initializeRemoteControl() {
+    try {
+      await this.#remoteControlPresenter.initialize()
+    } catch (error) {
+      console.error('RemoteControlPresenter.initialize failed:', error)
+    }
+  }
+
+  async callRemoteControl(
+    method: keyof IRemoteControlPresenter,
+    ...payloads: unknown[]
+  ): Promise<unknown> {
+    if (!Presenter.REMOTE_CONTROL_METHODS.has(method)) {
+      throw new Error(`Method "${String(method)}" is not allowed on "remoteControlPresenter"`)
+    }
+
+    const handler = this.#remoteControlBridge[method] as (...args: unknown[]) => unknown
+    return await Reflect.apply(handler, this.#remoteControlBridge, payloads)
+  }
+
   // 从配置中同步自定义模型到 LLMProviderPresenter
   private async syncCustomModels() {
     const providers = this.configPresenter.getProviders()
@@ -359,7 +686,8 @@ export class Presenter implements IPresenter {
   }
 
   // 在应用退出时进行清理，关闭数据库连接
-  destroy() {
+  async destroy(): Promise<void> {
+    await this.destroyRemoteControl()
     this.floatingButtonPresenter.destroy() // 销毁悬浮按钮
     this.tabPresenter.destroy()
     this.sqlitePresenter.close() // 关闭数据库连接
@@ -367,10 +695,19 @@ export class Presenter implements IPresenter {
     this.syncPresenter.destroy() // 销毁同步相关资源
     this.notificationPresenter.clearAllNotifications() // 清除所有通知
     this.knowledgePresenter.destroy() // 释放所有数据库连接
+    ;(this.workspacePresenter as WorkspacePresenter).destroy() // 销毁 Workspace watchers
     ;(this.skillPresenter as SkillPresenter).destroy() // 销毁 Skills 相关资源
     ;(this.skillSyncPresenter as SkillSyncPresenter).destroy() // 销毁 Skill Sync 相关资源
     // 注意: trayPresenter.destroy() 在 main/index.ts 的 will-quit 事件中处理
     // 此处不销毁 trayPresenter，其生命周期由 main/index.ts 管理
+  }
+
+  private async destroyRemoteControl() {
+    try {
+      await this.#remoteControlPresenter.destroy()
+    } catch (error) {
+      console.error('RemoteControlPresenter.destroy failed:', error)
+    }
   }
 }
 
@@ -414,6 +751,13 @@ ipcMain.handle(
         )
       }
 
+      if (!Presenter.DISPATCHABLE_PRESENTERS.has(name as keyof IPresenter)) {
+        console.warn(
+          `[IPC Warning] WebContents:${context.webContentsId} blocked presenter access: ${name}`
+        )
+        return { error: `Presenter "${name}" is not accessible via generic dispatcher` }
+      }
+
       // 通过名称获取对应的 Presenter 实例
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       let calledPresenter: any = presenter[name as keyof Presenter]
@@ -445,6 +789,38 @@ ipcMain.handle(
       const webContentsId = event.sender.id
 
       console.error(`[IPC Error] WebContents:${webContentsId} ${name}.${method}:`, e)
+      return { error: e.message || String(e) }
+    }
+  }
+)
+
+ipcMain.handle(
+  'remoteControlPresenter:call',
+  async (event: IpcMainInvokeEvent, method: string, ...payloads: unknown[]) => {
+    try {
+      const webContentsId = event.sender.id
+      const windowId = BrowserWindow.fromWebContents(event.sender)?.id
+
+      if (import.meta.env.VITE_LOG_IPC_CALL === '1') {
+        console.log(
+          `[IPC Call] WebContents:${webContentsId} Window:${windowId || 'unknown'} -> remoteControlPresenter.${method}`
+        )
+      }
+
+      if (!Presenter.REMOTE_CONTROL_METHODS.has(method as keyof IRemoteControlPresenter)) {
+        console.warn(
+          `[IPC Warning] WebContents:${webContentsId} blocked remote control method: ${method}`
+        )
+        return { error: `Method "${method}" is not allowed on "remoteControlPresenter"` }
+      }
+
+      return await presenter.callRemoteControl(method as keyof IRemoteControlPresenter, ...payloads)
+    } catch (
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      e: any
+    ) {
+      const webContentsId = event.sender.id
+      console.error(`[IPC Error] WebContents:${webContentsId} remoteControlPresenter.${method}:`, e)
       return { error: e.message || String(e) }
     }
   }

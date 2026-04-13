@@ -28,12 +28,41 @@
     "agentWorkspaceTooltip": "エージェントの作業ディレクトリを設定する",
     "attach": "添付",
     "voiceInput": "音声入力",
+    "queue": "キューに追加",
+    "stop": "停止",
     "mcp": {
       "badge": "MCP {count}",
       "title": "有効な MCP",
       "empty": "有効なサービスはありません",
       "openSettings": "MCP 設定を開く"
+    },
+    "tools": {
+      "badge": "Tools",
+      "title": "Tools",
+      "mcpSection": "MCP",
+      "builtinSection": "内蔵ツール",
+      "loading": "Loading tools...",
+      "builtinEmpty": "No built-in tools available",
+      "groups": {
+        "agentFilesystem": "Agent Filesystem",
+        "agentCore": "Agent Core",
+        "agentSkills": "Agent Skills",
+        "deepchatSettings": "DeepChat Settings",
+        "yobrowser": "YoBrowser"
+      }
     }
+  },
+  "pendingInput": {
+    "steer": "誘導",
+    "queueCount": "送信待ち {count}/{max}",
+    "resumeQueue": "送信を再開",
+    "toSteer": "誘導にする",
+    "locked": "ロック済み",
+    "reorder": "並べ替え",
+    "files": "{count} 件のファイル",
+    "attachmentsOnly": "{count} 件の添付ファイル",
+    "empty": "空のメッセージ",
+    "limitReached": "待機レーンがいっぱいです（最大{max}件）。"
   },
   "features": {
     "webSearch": "ウェブ検索",
@@ -54,6 +83,7 @@
   "messages": {
     "thinking": "思考中...",
     "rateLimitWaiting": "レート制限により、キューで待機中...",
+    "rateLimitCompactLoading": "制限中（{seconds}秒）",
     "rateLimitTitle": "リクエストレート制限",
     "rateLimitQueue": "キューの位置",
     "rateLimitEstimated": "推定待機時間",
@@ -72,17 +102,6 @@
     "generationComplete": "生成完了",
     "generationError": "生成失敗"
   },
-  "navigation": {
-    "title": "メッセージナビゲーション",
-    "searchPlaceholder": "メッセージを検索...",
-    "noResults": "一致するメッセージが見つかりません",
-    "noMessages": "まだメッセージはありません",
-    "totalMessages": "合計 {count} 件のメッセージ",
-    "searchResults": "{total} 件中 {count} 件の結果を表示",
-    "userMessage": "ユーザーメッセージ",
-    "assistantMessage": "アシスタントの返信",
-    "unknownMessage": "不明なメッセージ"
-  },
   "toolCall": {
     "title": "ツール呼び出し",
     "calling": "ツール呼び出し中",
@@ -92,13 +111,24 @@
     "clickToView": "詳細を表示",
     "functionName": "関数名",
     "params": "パラメータ",
-    "responseData": "レスポンスデータ"
-  },
-  "mcpUi": {
-    "badge": "UI",
-    "collapse": "折りたたむ",
-    "expand": "展開",
-    "title": "MCP UI"
+    "responseData": "レスポンスデータ",
+    "subagents": {
+      "summary": "{mode} · {count} 個のサブエージェント",
+      "unnamedTask": "名前未設定のタスク",
+      "mode": {
+        "parallel": "並列",
+        "chain": "直列"
+      },
+      "status": {
+        "queued": "待機中",
+        "running": "実行中",
+        "completed": "完了",
+        "error": "エラー",
+        "cancelled": "キャンセル済み",
+        "waiting_permission": "権限待ち",
+        "waiting_question": "入力待ち"
+      }
+    }
   },
   "mode": {
     "acpAgent": "ACPエージェント",
@@ -107,7 +137,8 @@
   },
   "topbar": {
     "share": "共有",
-    "more": "その他"
+    "more": "その他",
+    "backToParent": "親セッションに戻る"
   },
   "advancedSettings": {
     "button": "詳細設定",
@@ -120,16 +151,28 @@
     "maxTokens": "最大トークン",
     "thinkingBudget": "思考予算",
     "verbosity": "回答の詳しさ",
+    "forceInterleavedThinkingCompat": "Interleaved Thinking",
+    "forceInterleavedThinkingCompatDescription": "このセッションで reasoning と tool-call メッセージを Interleaved Thinking として処理するかを制御します。",
     "verbosityPlaceholder": "詳しさを選択",
     "currentCustomPrompt": "現在のカスタム",
-    "useDefault": "デフォルトを使用"
+    "useDefault": "デフォルトを使用",
+    "decreaseValue": "{label}を減らす",
+    "increaseValue": "{label}を増やす",
+    "toggleValue": "{label}のオン・オフを切り替える",
+    "validation": {
+      "finiteNumber": "有限の数値である必要があります",
+      "nonNegativeInteger": "0以上の整数である必要があります",
+      "contextLengthAtLeastMaxTokens": "最大トークン数以上である必要があります",
+      "maxTokensWithinContextLength": "コンテキスト長以下である必要があります"
+    }
   },
   "workspace": {
     "collapse": "近い",
     "sections": {
       "files": "ファイル",
       "git": "Git",
-      "artifacts": "Artifacts"
+      "artifacts": "Artifacts",
+      "subagents": "サブエージェント"
     },
     "files": {
       "contextMenu": {
@@ -183,7 +226,19 @@
         "aborted": "中止"
       }
     },
-    "title": "ワークスペース"
+    "title": "ワークスペース",
+    "subagents": {
+      "empty": "子セッションはまだありません",
+      "self": "このエージェント",
+      "status": {
+        "working": "実行中",
+        "error": "エラー",
+        "idle": "待機中"
+      }
+    }
+  },
+  "modelPicker": {
+    "empty": "モデルが見つかりません"
   },
   "audio": {
     "play": "再生",
@@ -222,9 +277,60 @@
     "allAgents": "すべてのエージェント",
     "expandSidebar": "サイドバーを展開",
     "collapseSidebar": "サイドバーを折りたたむ",
+    "remoteControlStatus": {
+      "disabled": "リモート操作は無効です",
+      "stopped": "リモート操作は停止しました",
+      "starting": "リモート操作を開始中",
+      "running": "リモート操作は稼働中です",
+      "backoff": "リモート操作を再試行中",
+      "error": "リモート操作エラー"
+    },
     "groupByDate": "日付でグループ化",
     "groupByProject": "プロジェクトでグループ化",
+    "pinned": "ピン留め",
     "emptyTitle": "まだ会話がありません",
-    "emptyDescription": "新しいチャットを始めましょう"
+    "emptyDescription": "新しいチャットを始めましょう",
+    "remoteControlDisabled": "無効",
+    "searchPlaceholder": "チャットタイトルを検索",
+    "searchAriaLabel": "チャットタイトルを検索",
+    "searchEmptyTitle": "一致する会話はありません",
+    "searchEmptyDescription": "別のキーワードを試してください"
+  },
+  "floatingWidget": {
+    "title": "DeepChat",
+    "collapse": "フローティングセッションを折りたたむ",
+    "empty": "DeepChat セッションはまだありません",
+    "executing": "アクティブ",
+    "sessionCount": "{count}件のセッション",
+    "untitled": "新しいチャット",
+    "status": {
+      "inProgress": "進行中",
+      "done": "完了",
+      "error": "エラー"
+    }
+  },
+  "subagents": {
+    "label": "サブエージェント"
+  },
+  "spotlight": {
+    "placeholder": "会話、Agent、設定、アクションを検索…",
+    "searching": "検索中…",
+    "emptyTitle": "一致する結果がありません",
+    "emptyDescription": "別のキーワードを試すか、最近のセッションを開いてください。",
+    "hints": "↑↓ 移動 · Enter 開く · Esc 閉じる · Home/End ジャンプ",
+    "kind": {
+      "session": "セッション",
+      "message": "メッセージ",
+      "agent": "Agent",
+      "setting": "設定",
+      "action": "アクション"
+    }
+  },
+  "inlineSearch": {
+    "placeholder": "現在の会話を検索",
+    "ariaLabel": "現在の会話を検索",
+    "previous": "前の一致",
+    "next": "次の一致",
+    "close": "検索を閉じる"
   }
 }

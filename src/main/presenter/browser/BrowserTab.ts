@@ -8,6 +8,10 @@ import {
 import { CDPManager } from './CDPManager'
 import { ScreenshotManager } from './ScreenshotManager'
 
+const INTERACTIVE_READY_WAIT_TIMEOUT_MS = 2000
+const INTERACTIVE_READY_TIMEOUT_MESSAGE_PREFIX = 'Timed out waiting for dom-ready:'
+const NAVIGATION_CDP_METHODS = new Set(['Page.navigate', 'Page.reload'])
+
 export class BrowserTab {
   readonly pageId: string
   readonly createdAt: number
@@ -20,6 +24,11 @@ export class BrowserTab {
   private readonly cdpManager: CDPManager
   private readonly screenshotManager: ScreenshotManager
   private isAttached = false
+  private awaitingMainFrameInteractive = false
+  private interactiveReady = false
+  private lastInteractiveAt: number | null = null
+  private loadingStartedAt: number | null = null
+  private fullReady = false
 
   constructor(
     webContents: WebContents,
@@ -34,6 +43,7 @@ export class BrowserTab {
     this.screenshotManager = screenshotManager
     this.url = webContents.getURL() || 'about:blank'
     this.title = webContents.getTitle() || ''
+    this.bindLifecycleEvents()
   }
 
   get contents(): WebContents {
@@ -45,39 +55,91 @@ export class BrowserTab {
   }
 
   async navigate(url: string, timeoutMs?: number): Promise<void> {
-    this.status = BrowserPageStatus.Loading
-    this.url = url
-    this.updatedAt = Date.now()
-    await this.ensureSession()
+    this.beginMainFrameNavigation(url)
     try {
-      await this.webContents.loadURL(url)
-      await this.waitForLoad(timeoutMs)
+      await this.withTimeout(this.webContents.loadURL(url), timeoutMs ?? 30000)
       this.title = this.webContents.getTitle() || url
+      this.fullReady = true
       this.status = BrowserPageStatus.Ready
       this.updatedAt = Date.now()
     } catch (error) {
-      this.status = BrowserPageStatus.Error
-      console.error(`[YoBrowser][${this.pageId}] navigate failed:`, error)
+      this.markNavigationError(error)
+      throw error
+    }
+  }
+
+  async navigateUntilDomReady(url: string, timeoutMs: number = 30000): Promise<void> {
+    this.beginMainFrameNavigation(url)
+
+    const loadPromise = this.webContents.loadURL(url)
+    void loadPromise.catch((error) => {
+      if (this.interactiveReady) {
+        console.warn(`[YoBrowser][${this.pageId}] background load rejected after dom-ready`, {
+          url,
+          error
+        })
+      }
+    })
+
+    try {
+      await Promise.race([this.waitForInteractiveReady(timeoutMs), loadPromise])
+      if (!this.interactiveReady) {
+        throw new Error(`Navigation finished before dom-ready for ${url}`)
+      }
+      this.title = this.webContents.getTitle() || url
+      this.updatedAt = Date.now()
+    } catch (error) {
+      this.markNavigationError(error)
       throw error
     }
   }
 
   async extractDOM(selector?: string): Promise<string> {
+    await this.ensureInteractiveReadyOrWait('extract DOM')
     const session = await this.ensureSession()
     return await this.cdpManager.getDOM(session, selector)
   }
 
   async evaluateScript(script: string): Promise<unknown> {
+    await this.ensureInteractiveReadyOrWait('evaluate script')
     const session = await this.ensureSession()
     return await this.cdpManager.evaluateScript(session, script)
   }
 
   async sendCdpCommand(method: string, params?: Record<string, unknown>): Promise<unknown> {
+    if (NAVIGATION_CDP_METHODS.has(method)) {
+      this.ensureAvailable()
+    } else {
+      await this.ensureInteractiveReadyOrWait(`send CDP command ${method}`)
+    }
+
     const session = await this.ensureSession()
-    return await session.sendCommand(method, params ?? {})
+    const response = await session.sendCommand(method, params ?? {})
+
+    if (method === 'Page.navigate') {
+      const navigationResponse = response as {
+        loaderId?: string
+        errorText?: string
+      }
+      const hasCommittedCrossDocumentNavigation =
+        typeof navigationResponse.loaderId === 'string' &&
+        navigationResponse.loaderId.trim() !== '' &&
+        !navigationResponse.errorText
+
+      if (hasCommittedCrossDocumentNavigation) {
+        this.beginMainFrameNavigation(
+          typeof params?.url === 'string' && params.url.trim() ? params.url : this.url
+        )
+      }
+    } else if (method === 'Page.reload') {
+      this.beginMainFrameNavigation(this.url)
+    }
+
+    return response
   }
 
   async takeScreenshot(options?: ScreenshotOptions): Promise<string> {
+    await this.ensureInteractiveReadyOrWait('capture screenshot')
     await this.ensureSession()
     this.ensureAvailable()
 
@@ -148,7 +210,7 @@ export class BrowserTab {
 
   async goBack(): Promise<void> {
     this.ensureAvailable()
-    if (this.webContents.canGoBack()) {
+    if (this.webContents.navigationHistory.canGoBack()) {
       this.webContents.goBack()
       await this.waitForNetworkIdle()
     }
@@ -156,7 +218,7 @@ export class BrowserTab {
 
   async goForward(): Promise<void> {
     this.ensureAvailable()
-    if (this.webContents.canGoForward()) {
+    if (this.webContents.navigationHistory.canGoForward()) {
       this.webContents.goForward()
       await this.waitForNetworkIdle()
     }
@@ -462,6 +524,7 @@ export class BrowserTab {
 
   private async evaluate<T>(fn: (...args: any[]) => T, ...args: any[]): Promise<T> {
     this.ensureAvailable()
+    await this.ensureInteractiveReadyOrWait('evaluate script')
     const session = await this.ensureSession()
     const serializedArgs = JSON.stringify(args, (_key, value) =>
       value === undefined ? null : value
@@ -475,6 +538,37 @@ export class BrowserTab {
     if (this.webContents.isDestroyed()) {
       throw new Error('Page is no longer available')
     }
+  }
+
+  private async ensureInteractiveReadyOrWait(
+    action: string,
+    timeoutMs: number = INTERACTIVE_READY_WAIT_TIMEOUT_MS
+  ): Promise<void> {
+    this.ensureAvailable()
+
+    if (this.interactiveReady) {
+      return
+    }
+
+    if (this.awaitingMainFrameInteractive || this.status === BrowserPageStatus.Loading) {
+      try {
+        await this.waitForInteractiveReady(timeoutMs)
+      } catch (error) {
+        if (!this.isInteractiveReadyTimeoutError(error)) {
+          throw error
+        }
+      }
+
+      if (this.interactiveReady) {
+        return
+      }
+
+      if (await this.probeInteractiveReadiness()) {
+        return
+      }
+    }
+
+    throw this.buildNotReadyError(action)
   }
 
   private validateKeyInput(key: string, count: number): string {
@@ -542,22 +636,16 @@ export class BrowserTab {
   }
 
   async waitForLoad(timeoutMs: number = 30000): Promise<void> {
-    // Check if webContents is destroyed
     if (this.webContents.isDestroyed()) {
       throw new Error('WebContents destroyed')
     }
 
-    // If not loading, return immediately
-    if (!this.webContents.isLoading()) {
+    if (this.fullReady && !this.webContents.isLoading()) {
       return
     }
 
-    // Wait for load with timeout
     let settled = false
-    let domReadyFired = false
     let timeoutId: NodeJS.Timeout | null = null
-    let onStopLoading: (() => void) | null = null
-    let onDomReady: (() => void) | null = null
     let onFinishLoad: (() => void) | null = null
     let onFailLoad: ((...args: any[]) => void) | null = null
 
@@ -565,12 +653,6 @@ export class BrowserTab {
       if (timeoutId) {
         clearTimeout(timeoutId)
         timeoutId = null
-      }
-      if (onStopLoading) {
-        this.webContents.removeListener('did-stop-loading', onStopLoading)
-      }
-      if (onDomReady) {
-        this.webContents.removeListener('dom-ready', onDomReady)
       }
       if (onFinishLoad) {
         this.webContents.removeListener('did-finish-load', onFinishLoad)
@@ -589,30 +671,27 @@ export class BrowserTab {
 
     try {
       await new Promise<void>((resolvePromise, rejectPromise) => {
-        onStopLoading = () => settle(resolvePromise)
-
-        onDomReady = () => {
-          domReadyFired = true
-        }
-
         onFinishLoad = () => settle(resolvePromise)
 
-        onFailLoad = (_event: unknown, errorCode: number, errorDescription: string) => {
+        onFailLoad = (
+          _event: unknown,
+          errorCode: number,
+          errorDescription: string,
+          _validatedURL: string,
+          isMainFrame: boolean
+        ) => {
+          if (!isMainFrame) {
+            return
+          }
           settle(() =>
             rejectPromise(new Error(`Navigation failed ${errorCode}: ${errorDescription}`))
           )
         }
 
         timeoutId = setTimeout(() => {
-          if (domReadyFired) {
-            settle(resolvePromise)
-            return
-          }
           settle(() => rejectPromise(new Error('Timed out waiting for page load')))
         }, timeoutMs)
 
-        this.webContents.once('did-stop-loading', onStopLoading)
-        this.webContents.once('dom-ready', onDomReady)
         this.webContents.once('did-finish-load', onFinishLoad)
         this.webContents.once('did-fail-load', onFailLoad as any)
       })
@@ -657,6 +736,257 @@ export class BrowserTab {
       }
     }
     return this.webContents.debugger
+  }
+
+  private beginMainFrameNavigation(url: string): void {
+    const now = Date.now()
+    this.url = url
+    this.awaitingMainFrameInteractive = true
+    this.interactiveReady = false
+    this.fullReady = false
+    this.loadingStartedAt = now
+    this.status = BrowserPageStatus.Loading
+    this.updatedAt = now
+  }
+
+  private markNavigationError(error: unknown): void {
+    this.awaitingMainFrameInteractive = false
+    this.interactiveReady = false
+    this.fullReady = false
+    this.loadingStartedAt = null
+    this.status = BrowserPageStatus.Error
+    this.updatedAt = Date.now()
+    console.error(`[YoBrowser][${this.pageId}] navigation failed`, {
+      url: this.url,
+      status: this.status,
+      error
+    })
+  }
+
+  private async waitForInteractiveReady(timeoutMs: number): Promise<void> {
+    if (this.interactiveReady) {
+      return
+    }
+
+    this.ensureAvailable()
+
+    await new Promise<void>((resolve, reject) => {
+      let timeoutId: NodeJS.Timeout | null = null
+
+      const cleanup = () => {
+        if (timeoutId) {
+          clearTimeout(timeoutId)
+          timeoutId = null
+        }
+        this.webContents.removeListener('dom-ready', onDomReady)
+        this.webContents.removeListener('did-fail-load', onFailLoad as any)
+        this.webContents.removeListener('destroyed', onDestroyed)
+      }
+
+      const onDomReady = () => {
+        cleanup()
+        resolve()
+      }
+
+      const onFailLoad = (
+        _event: unknown,
+        errorCode: number,
+        errorDescription: string,
+        _validatedURL: string,
+        isMainFrame: boolean
+      ) => {
+        if (!isMainFrame) {
+          return
+        }
+        cleanup()
+        reject(new Error(`Navigation failed ${errorCode}: ${errorDescription}`))
+      }
+
+      const onDestroyed = () => {
+        cleanup()
+        reject(new Error('Page was destroyed before dom-ready'))
+      }
+
+      timeoutId = setTimeout(() => {
+        cleanup()
+        reject(new Error(`${INTERACTIVE_READY_TIMEOUT_MESSAGE_PREFIX} ${this.url}`))
+      }, timeoutMs)
+
+      this.webContents.once('dom-ready', onDomReady)
+      this.webContents.on('did-fail-load', onFailLoad as any)
+      this.webContents.once('destroyed', onDestroyed)
+    })
+  }
+
+  private isInteractiveReadyTimeoutError(error: unknown): error is Error {
+    return (
+      error instanceof Error && error.message.startsWith(INTERACTIVE_READY_TIMEOUT_MESSAGE_PREFIX)
+    )
+  }
+
+  private async probeInteractiveReadiness(): Promise<boolean> {
+    try {
+      const session = await this.ensureSession()
+      const probe = (await this.cdpManager.evaluateScript(
+        session,
+        `(() => {
+          try {
+            return {
+              readyState: document.readyState,
+              hasBody: Boolean(document.body),
+              href: location.href
+            }
+          } catch {
+            return null
+          }
+        })()`
+      )) as { readyState?: unknown; hasBody?: unknown; href?: unknown } | null
+
+      const readyState = typeof probe?.readyState === 'string' ? probe.readyState : ''
+      const hasBody = probe?.hasBody === true
+      if (readyState !== 'interactive' && readyState !== 'complete') {
+        return false
+      }
+
+      if (!hasBody) {
+        return false
+      }
+
+      this.awaitingMainFrameInteractive = false
+      this.interactiveReady = true
+      this.lastInteractiveAt = Date.now()
+      this.updatedAt = this.lastInteractiveAt
+      if (typeof probe?.href === 'string' && probe.href) {
+        this.url = probe.href
+      }
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  private buildNotReadyError(action: string): Error {
+    const error = new Error(
+      `YoBrowser page is not ready to ${action}. Retry this request. url=${this.url} status=${this.status}`
+    )
+    error.name = 'YoBrowserNotReadyError'
+    Object.assign(error, {
+      retryable: true,
+      url: this.url,
+      status: this.status,
+      lastInteractiveAt: this.lastInteractiveAt,
+      loadingStartedAt: this.loadingStartedAt
+    })
+    return error
+  }
+
+  private async withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+    return await new Promise<T>((resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        reject(new Error(`Timed out waiting for page load: ${this.url}`))
+      }, timeoutMs)
+
+      promise.then(
+        (value) => {
+          clearTimeout(timeoutId)
+          resolve(value)
+        },
+        (error) => {
+          clearTimeout(timeoutId)
+          reject(error)
+        }
+      )
+    })
+  }
+
+  private bindLifecycleEvents(): void {
+    this.webContents.on('did-start-navigation', (details) => {
+      if (!details.isMainFrame || details.isSameDocument) {
+        return
+      }
+
+      this.beginMainFrameNavigation(details.url || this.url)
+    })
+
+    this.webContents.on('did-navigate-in-page', (_event, url: string, isMainFrame: boolean) => {
+      if (!isMainFrame) {
+        return
+      }
+
+      this.url = url || this.url
+      this.updatedAt = Date.now()
+    })
+
+    this.webContents.on('did-start-loading', () => {
+      this.loadingStartedAt = Date.now()
+      this.status = BrowserPageStatus.Loading
+      this.updatedAt = this.loadingStartedAt
+    })
+
+    this.webContents.on('dom-ready', () => {
+      const now = Date.now()
+      this.awaitingMainFrameInteractive = false
+      this.interactiveReady = true
+      this.lastInteractiveAt = now
+      this.updatedAt = now
+      console.info(`[YoBrowser][${this.pageId}] page dom-ready`, {
+        url: this.url,
+        status: this.status
+      })
+    })
+
+    this.webContents.on('did-stop-loading', () => {
+      this.loadingStartedAt = null
+      if (this.interactiveReady) {
+        this.fullReady = true
+        this.status = BrowserPageStatus.Ready
+      }
+      this.updatedAt = Date.now()
+    })
+
+    this.webContents.on('did-finish-load', () => {
+      const now = Date.now()
+      this.awaitingMainFrameInteractive = false
+      this.interactiveReady = true
+      this.lastInteractiveAt = now
+      this.fullReady = true
+      this.status = BrowserPageStatus.Ready
+      this.title = this.webContents.getTitle() || this.url
+      this.updatedAt = now
+      console.info(`[YoBrowser][${this.pageId}] page did-finish-load`, {
+        url: this.url,
+        status: this.status
+      })
+    })
+
+    this.webContents.on(
+      'did-fail-load',
+      (
+        _event,
+        errorCode: number,
+        errorDescription: string,
+        validatedURL: string,
+        isMainFrame: boolean
+      ) => {
+        if (!isMainFrame || errorCode === -3) {
+          return
+        }
+
+        this.url = validatedURL || this.url
+        this.awaitingMainFrameInteractive = false
+        this.interactiveReady = false
+        this.fullReady = false
+        this.loadingStartedAt = null
+        this.status = BrowserPageStatus.Error
+        this.updatedAt = Date.now()
+        console.error(`[YoBrowser][${this.pageId}] navigation failed`, {
+          url: this.url,
+          status: this.status,
+          errorCode,
+          errorDescription
+        })
+      }
+    )
   }
 
   toPageInfo(): BrowserPageInfo {

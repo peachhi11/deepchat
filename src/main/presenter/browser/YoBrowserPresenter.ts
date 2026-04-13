@@ -3,51 +3,59 @@ import type { Rectangle } from 'electron'
 import { is } from '@electron-toolkit/utils'
 import { eventBus, SendTarget } from '@/eventbus'
 import { YO_BROWSER_EVENTS } from '@/events'
-import type {
-  BrowserContextSnapshot,
-  BrowserTabInfo,
-  BrowserWindowInfo,
-  ScreenshotOptions
+import logger from '@shared/logger'
+import {
+  BrowserPageStatus,
+  type BrowserPageInfo,
+  type ScreenshotOptions,
+  type YoBrowserStatus
 } from '@shared/types/browser'
 import type { DownloadInfo, IWindowPresenter, IYoBrowserPresenter } from '@shared/presenter'
 import { BrowserTab as BrowserPage } from './BrowserTab'
 import { CDPManager } from './CDPManager'
-import { ScreenshotManager } from './ScreenshotManager'
 import { DownloadManager } from './DownloadManager'
+import { ScreenshotManager } from './ScreenshotManager'
 import { clearYoBrowserSessionData, getYoBrowserSession } from './yoBrowserSession'
 import { YoBrowserToolHandler } from './YoBrowserToolHandler'
 
-type BrowserWindowState = {
-  id: number
-  viewId: number
+type SessionBrowserState = {
+  sessionId: string
+  view: WebContentsView
   page: BrowserPage
   createdAt: number
   updatedAt: number
-  isEmbedded?: boolean
-  view?: WebContentsView
-  visible?: boolean
-  attachedWindowId?: number | null
+  visible: boolean
+  attachedWindowId: number | null
+  lastBounds: Rectangle | null
+  hostReady: boolean
 }
 
-type BrowserWindowListeners = {
+type HostWindowListeners = {
   focus: () => void
   show: () => void
   hide: () => void
   closed: () => void
 }
 
+type HostReadyWaiter = {
+  sessionId: string
+  hostWindowId: number
+  timeoutId: NodeJS.Timeout
+  stableTimerId: NodeJS.Timeout | null
+  resolve: () => void
+  reject: (error: Error) => void
+}
+
 export class YoBrowserPresenter implements IYoBrowserPresenter {
-  private readonly browserWindows = new Map<number, BrowserWindowState>()
-  private readonly viewIdToWindowId = new Map<number, number>()
-  private readonly pageIdToWindowId = new Map<string, number>()
-  private readonly attachedWindowIds = new Set<number>()
-  private readonly windowListeners = new Map<number, BrowserWindowListeners>()
-  private embeddedState: BrowserWindowState | null = null
-  private activeWindowId: number | null = null
+  private readonly sessionBrowsers = new Map<string, SessionBrowserState>()
+  private readonly hostWindowListeners = new Map<number, HostWindowListeners>()
+  private readonly hostReadyWaiters = new Map<string, HostReadyWaiter>()
   private readonly cdpManager = new CDPManager()
   private readonly screenshotManager = new ScreenshotManager(this.cdpManager)
   private readonly downloadManager = new DownloadManager()
   private readonly windowPresenter: IWindowPresenter
+  private readonly embeddedHostReadyTimeoutMs = 5000
+  private readonly embeddedHostReadyStableMs = 120
   readonly toolHandler: YoBrowserToolHandler
 
   constructor(windowPresenter: IWindowPresenter) {
@@ -59,320 +67,186 @@ export class YoBrowserPresenter implements IYoBrowserPresenter {
     // Lazy initialization only.
   }
 
-  async ensureWindow(): Promise<number | null> {
-    const existing = this.getResolvedWindowState()
-    if (existing) {
-      return existing.id
-    }
-
-    const created = await this.ensureEmbeddedState('about:blank')
-    return created?.id ?? null
+  async getBrowserStatus(sessionId: string): Promise<YoBrowserStatus> {
+    return this.toStatus(this.sessionBrowsers.get(sessionId) ?? null)
   }
 
-  async openWindow(url?: string): Promise<BrowserWindowInfo | null> {
-    const created = await this.ensureEmbeddedState(url ?? 'about:blank')
-    if (!created) {
-      return null
+  async loadUrl(sessionId: string, url: string, timeoutMs?: number): Promise<YoBrowserStatus> {
+    const normalizedSessionId = sessionId.trim()
+    if (!normalizedSessionId) {
+      throw new Error('sessionId is required')
+    }
+    if (!url.trim()) {
+      throw new Error('url is required')
     }
 
-    const targetWindow =
-      this.windowPresenter.getFocusedWindow() || this.windowPresenter.getAllWindows()[0]
-    if (targetWindow) {
-      await this.attachEmbeddedToWindow(targetWindow.id)
+    const hostWindowId = this.resolveHostWindowId()
+    if (hostWindowId == null) {
+      throw new Error('No host window available for YoBrowser')
     }
 
-    this.windowPresenter.show(created.id, true)
-    this.setActiveWindowId(created.id)
-    this.emitWindowUpdated(created)
-    return this.toWindowInfo(created)
-  }
-
-  async attachEmbeddedToWindow(windowId: number): Promise<number | null> {
-    const state = await this.ensureEmbeddedState(undefined, windowId)
-    if (!state?.view) {
-      return null
-    }
-
-    const window = BrowserWindow.fromId(windowId)
-    if (!window || window.isDestroyed()) {
-      return null
-    }
-
-    if (state.attachedWindowId != null && state.attachedWindowId !== windowId) {
-      const previousWindowId = state.attachedWindowId
-      const previousWindow = BrowserWindow.fromId(previousWindowId)
-      this.detachWindowListeners(previousWindowId)
-      if (previousWindow && !previousWindow.isDestroyed()) {
-        try {
-          previousWindow.contentView.removeChildView(state.view)
-        } catch {
-          // Ignore already detached view.
-        }
-      }
-    }
-
-    if (state.attachedWindowId !== windowId) {
-      try {
-        window.contentView.addChildView(state.view)
-      } catch {
-        try {
-          window.contentView.removeChildView(state.view)
-        } catch {
-          // Ignore already detached view.
-        }
-        window.contentView.addChildView(state.view)
-      }
-    }
-
-    if (state.id !== windowId) {
-      state.id = windowId
-      this.viewIdToWindowId.set(state.viewId, windowId)
-      this.pageIdToWindowId.set(state.page.pageId, windowId)
-    }
-
-    this.attachWindowListeners(windowId)
-    state.attachedWindowId = windowId
-    state.updatedAt = Date.now()
-    this.setActiveWindowId(windowId)
-    this.emitWindowUpdated(state)
-    return state.id
-  }
-
-  async updateEmbeddedBounds(windowId: number, bounds: Rectangle, visible: boolean): Promise<void> {
-    const state = await this.ensureEmbeddedState(undefined, windowId)
-    if (!state?.view) {
-      return
-    }
-
-    if (!visible || bounds.width <= 0 || bounds.height <= 0) {
-      await this.detachEmbedded()
-      this.setWindowVisibility(state, false)
-      return
-    }
-
-    await this.attachEmbeddedToWindow(windowId)
-    state.view.setBounds({
-      x: Math.max(0, Math.round(bounds.x)),
-      y: Math.max(0, Math.round(bounds.y)),
-      width: Math.max(1, Math.round(bounds.width)),
-      height: Math.max(1, Math.round(bounds.height))
+    const state = this.ensureSessionBrowserState(normalizedSessionId)
+    this.markHostNotReady(state)
+    this.logLifecycle('open requested', {
+      sessionId: normalizedSessionId,
+      windowId: hostWindowId,
+      url
     })
+
+    this.emitOpenRequested(normalizedSessionId, hostWindowId, url)
+    this.windowPresenter.show(hostWindowId, true)
+
+    await this.waitForSessionHostReady(normalizedSessionId, hostWindowId, state)
+    await state.page.navigateUntilDomReady(url, timeoutMs ?? 30000)
     state.updatedAt = Date.now()
-    this.setWindowVisibility(state, true)
-    this.emitWindowUpdated(state)
+    this.emitWindowUpdated(normalizedSessionId)
+    return this.toStatus(state)
   }
 
-  async detachEmbedded(): Promise<void> {
-    const state = this.embeddedState
-    if (!state?.view) {
-      return
-    }
-
-    const attachedWindowId = state.attachedWindowId
-    if (attachedWindowId != null) {
-      const window = BrowserWindow.fromId(attachedWindowId)
-      this.detachWindowListeners(attachedWindowId)
-      if (window && !window.isDestroyed()) {
-        try {
-          window.contentView.removeChildView(state.view)
-        } catch {
-          // Ignore already detached view.
-        }
-      }
-    }
-
-    state.attachedWindowId = null
-    state.updatedAt = Date.now()
-    this.setWindowVisibility(state, false)
-  }
-
-  async focusWindow(windowId: number): Promise<void> {
-    if (this.embeddedState?.id === windowId) {
-      this.windowPresenter.show(windowId, true)
-      this.setActiveWindowId(windowId)
-      this.emitWindowUpdated(this.embeddedState)
-      return
-    }
-
-    const state = this.browserWindows.get(windowId)
-    if (!state) return
-    this.windowPresenter.show(windowId, true)
-    this.setActiveWindowId(windowId)
-    this.emitWindowVisibility(windowId, true)
-    this.emitWindowUpdated(state)
-  }
-
-  async closeWindow(windowId: number): Promise<void> {
-    if (this.embeddedState?.id === windowId) {
-      await this.destroyEmbeddedState(true)
-      return
-    }
-
-    if (!this.browserWindows.has(windowId)) return
-    await this.windowPresenter.closeWindow(windowId, true)
-  }
-
-  async listWindows(): Promise<BrowserWindowInfo[]> {
-    const windows = [
-      ...(this.embeddedState ? [this.embeddedState] : []),
-      ...Array.from(this.browserWindows.values())
-    ]
-
-    return windows
-      .sort((left, right) => right.updatedAt - left.updatedAt)
-      .map((state) => this.toWindowInfo(state))
-  }
-
-  async getActiveWindow(): Promise<BrowserWindowInfo | null> {
-    const state = this.getResolvedWindowState()
-    return state ? this.toWindowInfo(state) : null
-  }
-
-  async getWindowById(windowId: number): Promise<BrowserWindowInfo | null> {
-    if (this.embeddedState?.id === windowId) {
-      return this.toWindowInfo(this.embeddedState)
-    }
-
-    const state = this.browserWindows.get(windowId)
-    return state ? this.toWindowInfo(state) : null
-  }
-
-  async hasWindow(): Promise<boolean> {
-    return this.browserWindows.size > 0 || this.embeddedState != null
-  }
-
-  async show(shouldFocus: boolean = true): Promise<void> {
-    const existing = this.getResolvedWindowState()
-    if (existing) {
-      if (existing.isEmbedded) {
-        if (shouldFocus) {
-          this.windowPresenter.show(existing.id, true)
-          this.setActiveWindowId(existing.id)
-        }
-
-        const canShowEmbedded =
-          existing.attachedWindowId != null &&
-          Boolean(existing.view && !existing.view.webContents.isDestroyed())
-        this.setWindowVisibility(existing, canShowEmbedded)
-      } else {
-        this.windowPresenter.show(existing.id, shouldFocus)
-        if (shouldFocus) {
-          this.setActiveWindowId(existing.id)
-        }
-        this.setWindowVisibility(existing, true)
-      }
-      return
-    }
-
-    await this.openWindow('about:blank')
-  }
-
-  async hide(): Promise<void> {
-    const state = this.getResolvedWindowState()
-    if (!state) return
-    if (state.isEmbedded) {
-      await this.detachEmbedded()
-      return
-    }
-    this.windowPresenter.hide(state.id)
-    this.emitWindowVisibility(state.id, false)
-  }
-
-  async toggleVisibility(): Promise<boolean> {
-    const state = this.getResolvedWindowState()
+  async attachSessionBrowser(sessionId: string, hostWindowId: number): Promise<boolean> {
+    const state = this.sessionBrowsers.get(sessionId)
     if (!state) {
-      await this.openWindow('about:blank')
-      return true
-    }
-
-    if (state.isEmbedded) {
-      const canShowEmbedded =
-        state.attachedWindowId != null &&
-        Boolean(state.view && !state.view.webContents.isDestroyed())
-      if (!canShowEmbedded) {
-        this.setWindowVisibility(state, false)
-        return false
-      }
-
-      const nextVisible = !state.visible
-      this.setWindowVisibility(state, nextVisible)
-      return nextVisible
-    }
-
-    const window = BrowserWindow.fromId(state.id)
-    if (!window || window.isDestroyed()) {
-      await this.openWindow('about:blank')
-      return true
-    }
-
-    if (window.isVisible()) {
-      await this.hide()
       return false
     }
 
-    await this.focusWindow(state.id)
+    const hostWindow = BrowserWindow.fromId(hostWindowId)
+    if (!hostWindow || hostWindow.isDestroyed()) {
+      return false
+    }
+
+    this.detachOtherSessionBrowsers(hostWindowId, sessionId)
+
+    if (state.attachedWindowId != null && state.attachedWindowId !== hostWindowId) {
+      this.detachFromWindow(state, state.attachedWindowId)
+    }
+
+    if (state.attachedWindowId !== hostWindowId) {
+      this.markHostNotReady(state)
+      try {
+        hostWindow.contentView.addChildView(state.view)
+      } catch {
+        try {
+          hostWindow.contentView.removeChildView(state.view)
+        } catch {
+          // Ignore already detached view.
+        }
+        hostWindow.contentView.addChildView(state.view)
+      }
+    }
+
+    this.attachHostWindowListeners(hostWindowId)
+    state.attachedWindowId = hostWindowId
+    state.updatedAt = Date.now()
+    this.emitWindowUpdated(sessionId)
     return true
   }
 
-  async isVisible(): Promise<boolean> {
-    const state = this.getResolvedWindowState()
-    if (!state) return false
-    if (state.isEmbedded) {
-      return Boolean(
-        state.visible &&
-        state.attachedWindowId != null &&
-        state.view &&
-        !state.view.webContents.isDestroyed()
-      )
-    }
-    const window = BrowserWindow.fromId(state.id)
-    return Boolean(window && !window.isDestroyed() && window.isVisible())
-  }
-
-  async navigateWindow(windowId: number, url: string, timeoutMs?: number): Promise<void> {
-    const state = this.browserWindows.get(windowId)
+  async updateSessionBrowserBounds(
+    sessionId: string,
+    hostWindowId: number,
+    bounds: Rectangle,
+    visible: boolean
+  ): Promise<void> {
+    const state = this.sessionBrowsers.get(sessionId)
     if (!state) {
-      const created = await this.openWindow(url)
-      if (!created) {
-        throw new Error(`Browser window ${windowId} not found`)
-      }
       return
     }
 
-    await state.page.navigate(url, timeoutMs)
+    const normalizedBounds = this.normalizeBounds(bounds)
+    state.lastBounds = normalizedBounds
     state.updatedAt = Date.now()
-    this.emitWindowUpdated(state)
+
+    if (!visible || normalizedBounds.width <= 0 || normalizedBounds.height <= 0) {
+      this.markHostNotReady(state)
+      this.setSessionVisibility(state, false)
+      return
+    }
+
+    if (state.attachedWindowId !== hostWindowId) {
+      const attached = await this.attachSessionBrowser(sessionId, hostWindowId)
+      if (!attached) {
+        return
+      }
+    }
+
+    state.view.setBounds(normalizedBounds)
+    this.setSessionVisibility(state, true)
+    this.scheduleSessionHostReady(sessionId, hostWindowId, normalizedBounds)
   }
 
-  async goBack(target?: number | string): Promise<void> {
-    const state = this.getResolvedWindowState(target)
-    if (!state) return
+  async detachSessionBrowser(sessionId: string): Promise<void> {
+    const state = this.sessionBrowsers.get(sessionId)
+    if (!state || state.attachedWindowId == null) {
+      return
+    }
+
+    this.detachFromWindow(state, state.attachedWindowId)
+    this.markHostNotReady(state)
+    state.updatedAt = Date.now()
+    this.setSessionVisibility(state, false)
+  }
+
+  async destroySessionBrowser(sessionId: string): Promise<void> {
+    const state = this.sessionBrowsers.get(sessionId)
+    if (!state) {
+      return
+    }
+
+    this.resolveOrRejectHostReadyWait(
+      sessionId,
+      new Error(`Session browser ${sessionId} was destroyed before it became ready`)
+    )
+    await this.detachSessionBrowser(sessionId)
+    state.page.destroy()
+    this.sessionBrowsers.delete(sessionId)
+
+    if (!state.view.webContents.isDestroyed()) {
+      try {
+        state.view.webContents.close()
+      } catch {
+        // Ignore view shutdown failures.
+      }
+    }
+
+    this.emitWindowClosed(sessionId)
+    this.emitWindowCount()
+  }
+
+  async goBack(sessionId: string): Promise<void> {
+    const state = this.sessionBrowsers.get(sessionId)
+    if (!state) {
+      return
+    }
     await state.page.goBack()
     state.updatedAt = Date.now()
-    this.emitWindowUpdated(state)
+    this.emitWindowUpdated(sessionId)
   }
 
-  async goForward(target?: number | string): Promise<void> {
-    const state = this.getResolvedWindowState(target)
-    if (!state) return
+  async goForward(sessionId: string): Promise<void> {
+    const state = this.sessionBrowsers.get(sessionId)
+    if (!state) {
+      return
+    }
     await state.page.goForward()
     state.updatedAt = Date.now()
-    this.emitWindowUpdated(state)
+    this.emitWindowUpdated(sessionId)
   }
 
-  async reload(target?: number | string): Promise<void> {
-    const state = this.getResolvedWindowState(target)
-    if (!state) return
+  async reload(sessionId: string): Promise<void> {
+    const state = this.sessionBrowsers.get(sessionId)
+    if (!state) {
+      return
+    }
     await state.page.reload()
     state.updatedAt = Date.now()
-    this.emitWindowUpdated(state)
+    this.emitWindowUpdated(sessionId)
   }
 
-  async getNavigationState(target?: number | string): Promise<{
+  async getNavigationState(sessionId: string): Promise<{
     canGoBack: boolean
     canGoForward: boolean
   }> {
-    const state = this.getResolvedWindowState(target)
+    const state = this.sessionBrowsers.get(sessionId)
     if (!state || state.page.contents.isDestroyed()) {
       return {
         canGoBack: false,
@@ -381,56 +255,59 @@ export class YoBrowserPresenter implements IYoBrowserPresenter {
     }
 
     return {
-      canGoBack: state.page.contents.canGoBack(),
-      canGoForward: state.page.contents.canGoForward()
+      canGoBack: state.page.contents.navigationHistory.canGoBack(),
+      canGoForward: state.page.contents.navigationHistory.canGoForward()
     }
   }
 
-  async getBrowserContext(): Promise<BrowserContextSnapshot> {
-    return {
-      activeWindowId: this.getResolvedWindowState()?.id ?? null,
-      windows: await this.listWindows()
-    }
-  }
-
-  async captureScreenshot(target: string | number, options?: ScreenshotOptions): Promise<string> {
-    const state = this.getResolvedWindowState(target)
+  async captureScreenshot(sessionId: string, options?: ScreenshotOptions): Promise<string> {
+    const state = this.sessionBrowsers.get(sessionId)
     if (!state) {
-      throw new Error(`Browser target ${String(target)} not found`)
+      throw new Error(`Session browser ${sessionId} not found`)
     }
-    return await state.page.takeScreenshot(options)
+
+    try {
+      return await state.page.takeScreenshot(options)
+    } catch (error) {
+      if (error instanceof Error && error.name === 'YoBrowserNotReadyError') {
+        this.logLifecycle('tool blocked:not-ready', {
+          sessionId,
+          url: state.page.url,
+          status: state.page.status,
+          action: 'capture screenshot'
+        })
+      }
+      throw error
+    }
   }
 
-  async extractDom(target: string | number, selector?: string): Promise<string> {
-    const state = this.getResolvedWindowState(target)
-    if (!state) {
-      throw new Error(`Browser target ${String(target)} not found`)
-    }
-    return await state.page.extractDOM(selector)
+  async getBrowserPage(sessionId: string): Promise<BrowserPageInfo | null> {
+    return this.sessionBrowsers.get(sessionId)?.page.toPageInfo() ?? null
   }
 
-  async evaluateScript(target: string | number, script: string): Promise<unknown> {
-    const state = this.getResolvedWindowState(target)
+  async sendCdpCommand(
+    sessionId: string,
+    method: string,
+    params?: Record<string, unknown>
+  ): Promise<unknown> {
+    const state = this.sessionBrowsers.get(sessionId)
     if (!state) {
-      throw new Error(`Browser target ${String(target)} not found`)
+      throw new Error(`Session browser ${sessionId} is not initialized`)
     }
-    return await state.page.evaluateScript(script)
+    return await state.page.sendCdpCommand(method, params)
   }
 
   async startDownload(url: string, savePath?: string): Promise<DownloadInfo> {
-    const state = this.getResolvedWindowState()
+    const state = this.findPreferredSessionState()
     if (!state || state.page.contents.isDestroyed()) {
-      throw new Error('No active browser window available')
+      throw new Error('No active session browser available')
     }
     return await this.downloadManager.downloadFile(url, savePath, state.page.contents)
   }
 
   async clearSandboxData(): Promise<void> {
     await clearYoBrowserSessionData()
-    if (this.embeddedState && !this.embeddedState.page.contents.isDestroyed()) {
-      this.embeddedState.page.contents.reloadIgnoringCache()
-    }
-    for (const state of this.browserWindows.values()) {
+    for (const state of this.sessionBrowsers.values()) {
       if (!state.page.contents.isDestroyed()) {
         state.page.contents.reloadIgnoringCache()
       }
@@ -438,118 +315,15 @@ export class YoBrowserPresenter implements IYoBrowserPresenter {
   }
 
   async shutdown(): Promise<void> {
-    await this.destroyEmbeddedState(false)
-    const windowIds = Array.from(this.browserWindows.keys())
-    for (const windowId of windowIds) {
-      await this.windowPresenter.closeWindow(windowId, true)
+    for (const sessionId of Array.from(this.sessionBrowsers.keys())) {
+      await this.destroySessionBrowser(sessionId)
     }
   }
 
-  // Deprecated wrappers kept temporarily while callers migrate to window semantics.
-  async listTabs(): Promise<BrowserTabInfo[]> {
-    return (await this.listWindows()).map((browserWindow) => ({
-      ...browserWindow.page,
-      isActive: browserWindow.id === this.activeWindowId
-    }))
-  }
-
-  async getActiveTab(): Promise<BrowserTabInfo | null> {
-    const activeWindow = await this.getActiveWindow()
-    if (!activeWindow) {
-      return null
-    }
-    return {
-      ...activeWindow.page,
-      isActive: true
-    }
-  }
-
-  async getTabById(pageId: string): Promise<BrowserTabInfo | null> {
-    const state = this.getResolvedWindowState(pageId)
-    if (!state) {
-      return null
-    }
-    return {
-      ...state.page.toPageInfo(),
-      isActive: state.id === this.activeWindowId
-    }
-  }
-
-  async createTab(url?: string): Promise<BrowserTabInfo | null> {
-    const browserWindow = await this.openWindow(url ?? 'about:blank')
-    if (!browserWindow) {
-      return null
-    }
-    return {
-      ...browserWindow.page,
-      isActive: true
-    }
-  }
-
-  async navigateTab(pageId: string, url: string, timeoutMs?: number): Promise<void> {
-    const state = this.getResolvedWindowState(pageId)
-    if (!state) {
-      throw new Error(`Browser page ${pageId} not found`)
-    }
-    await this.navigateWindow(state.id, url, timeoutMs)
-  }
-
-  async activateTab(pageId: string): Promise<void> {
-    const state = this.getResolvedWindowState(pageId)
-    if (!state) return
-    await this.focusWindow(state.id)
-  }
-
-  async closeTab(pageId: string): Promise<void> {
-    const state = this.getResolvedWindowState(pageId)
-    if (!state) return
-    await this.closeWindow(state.id)
-  }
-
-  async reuseTab(url: string): Promise<BrowserTabInfo | null> {
-    const existing = this.findReusableWindow(url)
+  private ensureSessionBrowserState(sessionId: string): SessionBrowserState {
+    const existing = this.sessionBrowsers.get(sessionId)
     if (existing) {
-      await this.navigateWindow(existing.id, url)
-      await this.focusWindow(existing.id)
-      return {
-        ...existing.page.toPageInfo(),
-        isActive: true
-      }
-    }
-    return await this.createTab(url)
-  }
-
-  async getTabIdByViewId(viewId: number): Promise<string | null> {
-    const windowId = this.viewIdToWindowId.get(viewId)
-    if (windowId == null) {
-      return null
-    }
-    const state = this.browserWindows.get(windowId)
-    return state?.page.pageId ?? null
-  }
-
-  async getBrowserTab(target?: string | number): Promise<BrowserPage | null> {
-    return this.getResolvedWindowState(target)?.page ?? null
-  }
-
-  private async ensureEmbeddedState(
-    url?: string,
-    preferredWindowId?: number
-  ): Promise<BrowserWindowState | null> {
-    const hostWindowId = this.resolveHostWindowId(preferredWindowId)
-    if (hostWindowId == null) {
-      return null
-    }
-
-    if (this.embeddedState) {
-      if (url && url !== this.embeddedState.page.url) {
-        await this.embeddedState.page.navigate(url)
-      }
-      if (this.embeddedState.id !== hostWindowId) {
-        this.embeddedState.id = hostWindowId
-        this.pageIdToWindowId.set(this.embeddedState.page.pageId, hostWindowId)
-      }
-      return this.embeddedState
+      return existing
     }
 
     const view = new WebContentsView({
@@ -565,36 +339,136 @@ export class YoBrowserPresenter implements IYoBrowserPresenter {
 
     const page = new BrowserPage(view.webContents, this.cdpManager, this.screenshotManager)
     const now = Date.now()
-    const state: BrowserWindowState = {
-      id: hostWindowId,
-      viewId: view.webContents.id,
+    const state: SessionBrowserState = {
+      sessionId,
+      view,
       page,
       createdAt: now,
       updatedAt: now,
-      isEmbedded: true,
-      view,
       visible: false,
-      attachedWindowId: null
+      attachedWindowId: null,
+      lastBounds: null,
+      hostReady: false
     }
 
-    this.embeddedState = state
-    this.viewIdToWindowId.set(state.viewId, hostWindowId)
-    this.pageIdToWindowId.set(page.pageId, hostWindowId)
-    this.setupPageListeners(hostWindowId, page, view.webContents, true)
-
-    if (url && url !== 'about:blank') {
-      await state.page.navigate(url)
-      state.updatedAt = state.page.updatedAt
-    }
-
-    this.setActiveWindowId(hostWindowId)
-    this.emitWindowCreated(state)
+    this.sessionBrowsers.set(sessionId, state)
+    this.setupPageListeners(state, view.webContents)
+    this.emitWindowCreated(sessionId)
     this.emitWindowCount()
     return state
   }
 
-  private attachWindowListeners(windowId: number): void {
-    if (this.attachedWindowIds.has(windowId)) {
+  private setupPageListeners(state: SessionBrowserState, contents: WebContents): void {
+    const sessionId = state.sessionId
+    const getState = () => this.sessionBrowsers.get(sessionId)
+
+    contents.on('did-navigate', (_event, url) => {
+      const current = getState()
+      if (!current) {
+        return
+      }
+      current.page.url = url
+      current.updatedAt = Date.now()
+      this.emitWindowUpdated(sessionId)
+    })
+
+    contents.on('page-title-updated', (_event, title) => {
+      const current = getState()
+      if (!current) {
+        return
+      }
+      current.page.title = title || current.page.url
+      current.updatedAt = Date.now()
+      this.emitWindowUpdated(sessionId)
+    })
+
+    contents.on('page-favicon-updated', (_event, favicons) => {
+      const current = getState()
+      if (!current || favicons.length === 0) {
+        return
+      }
+      if (current.page.favicon !== favicons[0]) {
+        current.page.favicon = favicons[0]
+        current.updatedAt = Date.now()
+        this.emitWindowUpdated(sessionId)
+      }
+    })
+
+    contents.on('did-start-loading', () => {
+      const current = getState()
+      if (!current) {
+        return
+      }
+      current.updatedAt = Date.now()
+      this.emitWindowUpdated(sessionId)
+    })
+
+    contents.on('dom-ready', () => {
+      const current = getState()
+      if (!current) {
+        return
+      }
+      current.updatedAt = Date.now()
+      this.emitWindowUpdated(sessionId)
+    })
+
+    contents.on('did-finish-load', () => {
+      const current = getState()
+      if (!current) {
+        return
+      }
+      current.updatedAt = Date.now()
+      this.emitWindowUpdated(sessionId)
+    })
+
+    contents.on(
+      'did-fail-load',
+      (
+        _event,
+        errorCode: number,
+        _errorDescription: string,
+        _validatedURL: string,
+        isMainFrame
+      ) => {
+        if (!isMainFrame || errorCode === -3) {
+          return
+        }
+
+        const current = getState()
+        if (!current) {
+          return
+        }
+        current.updatedAt = Date.now()
+        this.emitWindowUpdated(sessionId)
+      }
+    )
+
+    contents.on('destroyed', () => {
+      this.handleDestroyedContents(sessionId)
+    })
+  }
+
+  private handleDestroyedContents(sessionId: string): void {
+    const state = this.sessionBrowsers.get(sessionId)
+    if (!state) {
+      return
+    }
+
+    this.resolveOrRejectHostReadyWait(
+      sessionId,
+      new Error(`Session browser ${sessionId} was destroyed before it became ready`)
+    )
+    state.page.destroy()
+    state.attachedWindowId = null
+    state.visible = false
+    state.hostReady = false
+    this.sessionBrowsers.delete(sessionId)
+    this.emitWindowClosed(sessionId)
+    this.emitWindowCount()
+  }
+
+  private attachHostWindowListeners(windowId: number): void {
+    if (this.hostWindowListeners.has(windowId)) {
       return
     }
 
@@ -603,55 +477,52 @@ export class YoBrowserPresenter implements IYoBrowserPresenter {
       return
     }
 
-    this.attachedWindowIds.add(windowId)
-
     const focus = () => {
-      this.setActiveWindowId(windowId)
-      const state = this.getAttachedWindowState(windowId)
-      if (state) {
-        state.updatedAt = Date.now()
-        this.emitWindowUpdated(state)
+      const state = this.findAttachedStateByWindowId(windowId)
+      if (!state) {
+        return
       }
+      state.updatedAt = Date.now()
+      this.emitWindowFocused(state.sessionId, windowId)
+      this.emitWindowUpdated(state.sessionId)
     }
 
     const show = () => {
-      const state = this.getAttachedWindowState(windowId)
-      if (state?.isEmbedded) {
-        this.setWindowVisibility(state, true)
+      const state = this.findAttachedStateByWindowId(windowId)
+      if (!state) {
         return
       }
-      this.emitWindowVisibility(windowId, true)
+      this.setSessionVisibility(state, true)
     }
 
     const hide = () => {
-      const state = this.getAttachedWindowState(windowId)
-      if (state?.isEmbedded) {
-        this.setWindowVisibility(state, false)
+      const state = this.findAttachedStateByWindowId(windowId)
+      if (!state) {
         return
       }
-      this.emitWindowVisibility(windowId, false)
+      this.setSessionVisibility(state, false)
     }
 
     const closed = () => {
-      this.detachWindowListeners(windowId)
-      if (this.embeddedState?.attachedWindowId === windowId) {
-        void this.destroyEmbeddedState(false)
+      const state = this.findAttachedStateByWindowId(windowId)
+      if (state) {
+        state.attachedWindowId = null
+        state.hostReady = false
+        this.setSessionVisibility(state, false)
       }
-      this.cleanupWindow(windowId, true)
+      this.detachHostWindowListeners(windowId)
     }
 
-    this.windowListeners.set(windowId, { focus, show, hide, closed })
-
+    this.hostWindowListeners.set(windowId, { focus, show, hide, closed })
     window.on('focus', focus)
     window.on('show', show)
     window.on('hide', hide)
     window.on('closed', closed)
   }
 
-  private detachWindowListeners(windowId: number): void {
-    const listeners = this.windowListeners.get(windowId)
+  private detachHostWindowListeners(windowId: number): void {
+    const listeners = this.hostWindowListeners.get(windowId)
     if (!listeners) {
-      this.attachedWindowIds.delete(windowId)
       return
     }
 
@@ -663,136 +534,56 @@ export class YoBrowserPresenter implements IYoBrowserPresenter {
       window.removeListener('closed', listeners.closed)
     }
 
-    this.windowListeners.delete(windowId)
-    this.attachedWindowIds.delete(windowId)
+    this.hostWindowListeners.delete(windowId)
   }
 
-  private getAttachedWindowState(windowId: number): BrowserWindowState | null {
-    if (this.embeddedState?.attachedWindowId === windowId) {
-      return this.embeddedState
-    }
-    return this.browserWindows.get(windowId) ?? null
-  }
+  private detachOtherSessionBrowsers(hostWindowId: number, exceptSessionId: string): void {
+    for (const state of this.sessionBrowsers.values()) {
+      if (state.sessionId === exceptSessionId || state.attachedWindowId !== hostWindowId) {
+        continue
+      }
 
-  private setupPageListeners(
-    windowId: number,
-    page: BrowserPage,
-    contents: WebContents,
-    isEmbedded: boolean = false
-  ): void {
-    contents.on('did-navigate', (_event, url) => {
-      const state = isEmbedded ? this.embeddedState : this.browserWindows.get(windowId)
-      if (!state) return
-      page.url = url
+      this.detachFromWindow(state, hostWindowId)
+      this.markHostNotReady(state)
+      this.setSessionVisibility(state, false)
       state.updatedAt = Date.now()
-      this.emitWindowUpdated(state)
-    })
-
-    contents.on('page-title-updated', (_event, title) => {
-      const state = isEmbedded ? this.embeddedState : this.browserWindows.get(windowId)
-      if (!state) return
-      page.title = title || page.url
-      state.updatedAt = Date.now()
-      this.emitWindowUpdated(state)
-    })
-
-    contents.on('page-favicon-updated', (_event, favicons) => {
-      const state = isEmbedded ? this.embeddedState : this.browserWindows.get(windowId)
-      if (!state || favicons.length === 0) return
-      if (page.favicon !== favicons[0]) {
-        page.favicon = favicons[0]
-        state.updatedAt = Date.now()
-        this.emitWindowUpdated(state)
-      }
-    })
-
-    contents.on('destroyed', () => {
-      if (isEmbedded) {
-        void this.destroyEmbeddedState(false)
-      } else {
-        this.cleanupWindow(windowId, false)
-      }
-    })
+      this.emitWindowUpdated(state.sessionId)
+    }
   }
 
-  private cleanupWindow(windowId: number, emitClosed: boolean): void {
-    const state = this.browserWindows.get(windowId)
-    if (!state) {
-      this.detachWindowListeners(windowId)
-      return
+  private detachFromWindow(state: SessionBrowserState, hostWindowId: number): void {
+    const window = BrowserWindow.fromId(hostWindowId)
+    if (window && !window.isDestroyed()) {
+      try {
+        window.contentView.removeChildView(state.view)
+      } catch {
+        // Ignore already detached view.
+      }
     }
-
-    state.page.destroy()
-    this.browserWindows.delete(windowId)
-    this.viewIdToWindowId.delete(state.viewId)
-    this.pageIdToWindowId.delete(state.page.pageId)
-    this.detachWindowListeners(windowId)
-
-    if (this.activeWindowId === windowId) {
-      this.activeWindowId = this.getResolvedWindowState()?.id ?? null
-      this.emitWindowFocused(this.activeWindowId)
-    }
-
-    if (emitClosed) {
-      this.emitWindowClosed(windowId)
-    }
-
-    this.emitWindowCount()
+    state.attachedWindowId = null
   }
 
-  private getResolvedWindowState(target?: number | string): BrowserWindowState | null {
-    if (this.embeddedState) {
-      if (typeof target === 'number' && target === this.embeddedState.id) {
-        return this.embeddedState
-      }
-
-      if (
-        typeof target === 'string' &&
-        target.trim() &&
-        target === this.embeddedState.page.pageId
-      ) {
-        return this.embeddedState
+  private findAttachedStateByWindowId(windowId: number): SessionBrowserState | null {
+    for (const state of this.sessionBrowsers.values()) {
+      if (state.attachedWindowId === windowId) {
+        return state
       }
     }
-
-    if (typeof target === 'number') {
-      return this.browserWindows.get(target) ?? null
-    }
-
-    if (typeof target === 'string' && target.trim()) {
-      const windowId = this.pageIdToWindowId.get(target)
-      return windowId != null ? (this.browserWindows.get(windowId) ?? null) : null
-    }
-
-    const activeFromFocused = this.findFocusedBrowserWindow()
-    if (activeFromFocused) {
-      this.activeWindowId = activeFromFocused.id
-      return activeFromFocused
-    }
-
-    if (this.activeWindowId != null) {
-      const activeState = this.browserWindows.get(this.activeWindowId)
-      if (activeState) {
-        return activeState
-      }
-    }
-
-    const [latest] = [
-      ...(this.embeddedState ? [this.embeddedState] : []),
-      ...Array.from(this.browserWindows.values())
-    ].sort((left, right) => right.updatedAt - left.updatedAt)
-    return latest ?? null
+    return null
   }
 
-  private findFocusedBrowserWindow(): BrowserWindowState | null {
-    const focusedWindow = this.windowPresenter.getFocusedWindow()
-    if (!focusedWindow || focusedWindow.isDestroyed()) {
+  private findPreferredSessionState(): SessionBrowserState | null {
+    const states = [...this.sessionBrowsers.values()]
+    if (states.length === 0) {
       return null
     }
-    if (this.embeddedState?.id === focusedWindow.id) {
-      return this.embeddedState
+
+    const visibleState = states.find((state) => state.visible)
+    if (visibleState) {
+      return visibleState
     }
-    return this.browserWindows.get(focusedWindow.id) ?? null
+
+    return states.sort((left, right) => right.updatedAt - left.updatedAt)[0] ?? null
   }
 
   private resolveHostWindowId(preferredWindowId?: number): number | null {
@@ -812,74 +603,201 @@ export class YoBrowserPresenter implements IYoBrowserPresenter {
     return firstWindow && !firstWindow.isDestroyed() ? firstWindow.id : null
   }
 
-  private findReusableWindow(url: string): BrowserWindowState | null {
-    if (!url) {
-      return this.getResolvedWindowState()
+  private async waitForSessionHostReady(
+    sessionId: string,
+    hostWindowId: number,
+    state: SessionBrowserState
+  ): Promise<void> {
+    if (
+      state.hostReady &&
+      state.attachedWindowId === hostWindowId &&
+      state.visible &&
+      state.lastBounds &&
+      state.lastBounds.width > 0 &&
+      state.lastBounds.height > 0
+    ) {
+      return
     }
 
-    try {
-      const targetHost = new URL(url).hostname
-      for (const state of this.browserWindows.values()) {
-        try {
-          if (new URL(state.page.url).hostname === targetHost) {
-            return state
-          }
-        } catch {
-          // Ignore invalid URL parsing for existing pages.
-        }
+    this.resolveOrRejectHostReadyWait(
+      sessionId,
+      new Error(
+        `Session browser host wait was interrupted before host ${hostWindowId} became ready`
+      )
+    )
+
+    await new Promise<void>((resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        const error = new Error(
+          `Session browser host ${hostWindowId} did not become ready within ${this.embeddedHostReadyTimeoutMs}ms`
+        )
+        this.resolveOrRejectHostReadyWait(sessionId, error)
+      }, this.embeddedHostReadyTimeoutMs)
+
+      this.hostReadyWaiters.set(sessionId, {
+        sessionId,
+        hostWindowId,
+        timeoutId,
+        stableTimerId: null,
+        resolve,
+        reject
+      })
+    })
+  }
+
+  private scheduleSessionHostReady(
+    sessionId: string,
+    hostWindowId: number,
+    bounds: Rectangle
+  ): void {
+    const state = this.sessionBrowsers.get(sessionId)
+    const waiter = this.hostReadyWaiters.get(sessionId)
+    if (!state || !waiter || waiter.hostWindowId !== hostWindowId) {
+      return
+    }
+
+    if (waiter.stableTimerId) {
+      clearTimeout(waiter.stableTimerId)
+      waiter.stableTimerId = null
+    }
+
+    const expectedBoundsKey = this.boundsKey(bounds)
+    waiter.stableTimerId = setTimeout(() => {
+      const currentState = this.sessionBrowsers.get(sessionId)
+      const currentWaiter = this.hostReadyWaiters.get(sessionId)
+      if (
+        !currentState ||
+        !currentWaiter ||
+        currentWaiter !== waiter ||
+        currentWaiter.hostWindowId !== hostWindowId ||
+        currentState.attachedWindowId !== hostWindowId ||
+        !currentState.visible ||
+        this.boundsKey(currentState.lastBounds) !== expectedBoundsKey
+      ) {
+        return
       }
-    } catch {
-      // Ignore invalid URL parsing for requested URL.
-    }
 
-    return this.getResolvedWindowState()
+      currentState.hostReady = true
+      this.logLifecycle('host ready', {
+        sessionId,
+        windowId: hostWindowId,
+        pageId: currentState.page.pageId,
+        url: currentState.page.url
+      })
+      this.resolveOrRejectHostReadyWait(sessionId)
+    }, this.embeddedHostReadyStableMs)
   }
 
-  private toWindowInfo(state: BrowserWindowState): BrowserWindowInfo {
-    const window = BrowserWindow.fromId(state.id)
+  private markHostNotReady(state: SessionBrowserState): void {
+    state.hostReady = false
+    const waiter = this.hostReadyWaiters.get(state.sessionId)
+    if (waiter?.stableTimerId) {
+      clearTimeout(waiter.stableTimerId)
+      waiter.stableTimerId = null
+    }
+  }
+
+  private resolveOrRejectHostReadyWait(sessionId: string, error?: Error): void {
+    const waiter = this.hostReadyWaiters.get(sessionId)
+    if (!waiter) {
+      return
+    }
+
+    clearTimeout(waiter.timeoutId)
+    if (waiter.stableTimerId) {
+      clearTimeout(waiter.stableTimerId)
+    }
+    this.hostReadyWaiters.delete(sessionId)
+
+    if (error) {
+      waiter.reject(error)
+      return
+    }
+
+    waiter.resolve()
+  }
+
+  private toStatus(state: SessionBrowserState | null): YoBrowserStatus {
+    if (!state || state.page.contents.isDestroyed()) {
+      return {
+        initialized: false,
+        page: null,
+        canGoBack: false,
+        canGoForward: false,
+        visible: false,
+        loading: false
+      }
+    }
+
     return {
-      id: state.id,
+      initialized: true,
       page: state.page.toPageInfo(),
-      isFocused: Boolean(window && !window.isDestroyed() && window.isFocused()),
-      isVisible: state.isEmbedded
-        ? Boolean(state.visible)
-        : Boolean(window && !window.isDestroyed() && window.isVisible()),
-      createdAt: state.createdAt,
-      updatedAt: state.updatedAt
+      canGoBack: state.page.contents.navigationHistory.canGoBack(),
+      canGoForward: state.page.contents.navigationHistory.canGoForward(),
+      visible: state.visible,
+      loading: state.page.contents.isLoading() || state.page.status === BrowserPageStatus.Loading
     }
   }
 
-  private setWindowVisibility(state: BrowserWindowState, visible: boolean): void {
+  private setSessionVisibility(state: SessionBrowserState, visible: boolean): void {
     if (state.visible === visible) {
       return
     }
     state.visible = visible
-    this.emitWindowVisibility(state.id, visible)
+    this.emitWindowVisibility(state.sessionId, visible)
   }
 
-  private setActiveWindowId(windowId: number | null): void {
-    this.activeWindowId = windowId
-    this.emitWindowFocused(windowId)
+  private normalizeBounds(bounds: Rectangle): Rectangle {
+    return {
+      x: Math.max(0, Math.round(bounds.x)),
+      y: Math.max(0, Math.round(bounds.y)),
+      width: Math.max(0, Math.round(bounds.width)),
+      height: Math.max(0, Math.round(bounds.height))
+    }
   }
 
-  private emitWindowCreated(state: BrowserWindowState): void {
+  private boundsKey(bounds?: Rectangle | null): string {
+    if (!bounds) {
+      return 'null'
+    }
+    return `${bounds.x}:${bounds.y}:${bounds.width}:${bounds.height}`
+  }
+
+  private logLifecycle(message: string, context: Record<string, unknown>): void {
+    logger.info(`[YoBrowser] ${message}`, context)
+  }
+
+  private emitWindowCreated(sessionId: string): void {
     eventBus.sendToRenderer(YO_BROWSER_EVENTS.WINDOW_CREATED, SendTarget.ALL_WINDOWS, {
-      window: this.toWindowInfo(state)
+      sessionId,
+      status: this.toStatus(this.sessionBrowsers.get(sessionId) ?? null)
     })
   }
 
-  private emitWindowUpdated(state: BrowserWindowState): void {
+  private emitOpenRequested(sessionId: string, windowId: number, url: string): void {
+    eventBus.sendToRenderer(YO_BROWSER_EVENTS.OPEN_REQUESTED, SendTarget.ALL_WINDOWS, {
+      sessionId,
+      windowId,
+      url
+    })
+  }
+
+  private emitWindowUpdated(sessionId: string): void {
     eventBus.sendToRenderer(YO_BROWSER_EVENTS.WINDOW_UPDATED, SendTarget.ALL_WINDOWS, {
-      window: this.toWindowInfo(state)
+      sessionId,
+      status: this.toStatus(this.sessionBrowsers.get(sessionId) ?? null)
     })
   }
 
-  private emitWindowClosed(windowId: number): void {
-    eventBus.sendToRenderer(YO_BROWSER_EVENTS.WINDOW_CLOSED, SendTarget.ALL_WINDOWS, { windowId })
+  private emitWindowClosed(sessionId: string): void {
+    eventBus.sendToRenderer(YO_BROWSER_EVENTS.WINDOW_CLOSED, SendTarget.ALL_WINDOWS, {
+      sessionId
+    })
   }
 
-  private emitWindowFocused(windowId: number | null): void {
+  private emitWindowFocused(sessionId: string, windowId: number): void {
     eventBus.sendToRenderer(YO_BROWSER_EVENTS.WINDOW_FOCUSED, SendTarget.ALL_WINDOWS, {
+      sessionId,
       windowId
     })
   }
@@ -888,48 +806,14 @@ export class YoBrowserPresenter implements IYoBrowserPresenter {
     eventBus.sendToRenderer(
       YO_BROWSER_EVENTS.WINDOW_COUNT_CHANGED,
       SendTarget.ALL_WINDOWS,
-      this.browserWindows.size + (this.embeddedState ? 1 : 0)
+      this.sessionBrowsers.size
     )
   }
 
-  private emitWindowVisibility(windowId: number, visible: boolean): void {
+  private emitWindowVisibility(sessionId: string, visible: boolean): void {
     eventBus.sendToRenderer(YO_BROWSER_EVENTS.WINDOW_VISIBILITY_CHANGED, SendTarget.ALL_WINDOWS, {
-      windowId,
+      sessionId,
       visible
     })
-  }
-
-  private async destroyEmbeddedState(emitClosed: boolean): Promise<void> {
-    const state = this.embeddedState
-    if (!state) {
-      return
-    }
-
-    await this.detachEmbedded()
-    state.page.destroy()
-    this.viewIdToWindowId.delete(state.viewId)
-    this.pageIdToWindowId.delete(state.page.pageId)
-
-    if (state.view && !state.view.webContents.isDestroyed()) {
-      try {
-        state.view.webContents.close()
-      } catch {
-        // Ignore view shutdown failures.
-      }
-    }
-
-    const closedWindowId = state.id
-    this.embeddedState = null
-
-    if (this.activeWindowId === closedWindowId) {
-      this.activeWindowId = this.getResolvedWindowState()?.id ?? null
-      this.emitWindowFocused(this.activeWindowId)
-    }
-
-    if (emitClosed) {
-      this.emitWindowClosed(closedWindowId)
-    }
-
-    this.emitWindowCount()
   }
 }

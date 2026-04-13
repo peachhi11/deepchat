@@ -1,17 +1,19 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref, computed, onScopeDispose, getCurrentScope } from 'vue'
 import type { ComputedRef } from 'vue'
 import { usePresenter } from '@/composables/usePresenter'
-import { SESSION_EVENTS } from '@/events'
 import type {
+  DeepChatSubagentMeta,
   SessionWithState,
+  SessionKind,
   CreateSessionInput,
   SendMessageInput
 } from '@shared/types/agent-interface'
-import type { MessageFile } from '@shared/chat'
 import { downloadBlob } from '@/lib/download'
 import { usePageRouterStore } from './pageRouter'
 import { useMessageStore } from './message'
+import { bindSessionStoreIpc } from './sessionIpc'
+import { getRendererWindowContext } from '@/lib/windowContext'
 
 // --- Type Definitions ---
 
@@ -27,6 +29,10 @@ export interface UISession {
   modelId: string
   isPinned: boolean
   isDraft: boolean
+  sessionKind: SessionKind
+  parentSessionId: string | null
+  subagentEnabled: boolean
+  subagentMeta: DeepChatSubagentMeta | null
   createdAt: number
   updatedAt: number
 }
@@ -38,6 +44,9 @@ export interface SessionGroup {
 }
 
 export type GroupMode = 'time' | 'project'
+
+const SIDEBAR_GROUP_MODE_KEY = 'sidebar_group_mode'
+const DEFAULT_GROUP_MODE: GroupMode = 'project'
 
 // --- Helper Functions ---
 
@@ -65,8 +74,26 @@ function mapToUISession(session: SessionWithState): UISession {
     modelId: session.modelId,
     isPinned: Boolean(session.isPinned),
     isDraft: Boolean(session.isDraft),
+    sessionKind: session.sessionKind,
+    parentSessionId: session.parentSessionId ?? null,
+    subagentEnabled: session.subagentEnabled,
+    subagentMeta: session.subagentMeta ?? null,
     createdAt: session.createdAt,
     updatedAt: session.updatedAt
+  }
+}
+
+function isRegularSession(session: Pick<UISession, 'sessionKind'>): boolean {
+  return (session.sessionKind ?? 'regular') === 'regular'
+}
+
+function getCurrentWebContentsId(): number {
+  return getRendererWindowContext().webContentsId ?? -1
+}
+
+function registerStoreCleanup(cleanup: () => void): void {
+  if (getCurrentScope()) {
+    onScopeDispose(cleanup)
   }
 }
 
@@ -109,7 +136,7 @@ function groupByProject(sessions: UISession[]): SessionGroup[] {
     projectMap.get(dir)!.push(session)
   }
   return Array.from(projectMap.entries()).map(([dir, sessions]) => ({
-    label: dir === '__no_project__' ? 'common.project.none' : (dir.split('/').pop() ?? dir),
+    label: dir === '__no_project__' ? 'common.project.none' : (dir.split(/[\\/]/).pop() ?? dir),
     labelKey: dir === '__no_project__' ? 'common.project.none' : undefined,
     sessions
   }))
@@ -133,17 +160,22 @@ function getContentType(format: 'markdown' | 'html' | 'txt' | 'nowledge-mem'): s
 // --- Store ---
 
 export const useSessionStore = defineStore('session', () => {
-  const newAgentPresenter = usePresenter('newAgentPresenter')
+  const agentSessionPresenter = usePresenter('agentSessionPresenter')
   const tabPresenter = usePresenter('tabPresenter')
+  const configPresenter = usePresenter('configPresenter', { safeCall: false })
   const pageRouter = usePageRouterStore()
   const messageStore = useMessageStore()
-  const myWebContentsId = window.api.getWebContentsId()
+  const myWebContentsId = getCurrentWebContentsId()
   let rendererReadyNotified = false
+  let groupModeLoadPromise: Promise<void> | null = null
+  let groupModeWritePromise: Promise<void> = Promise.resolve()
+  let hasLoadedGroupMode = false
+  let groupModeUpdateVersion = 0
 
   // --- State ---
   const sessions = ref<UISession[]>([])
   const activeSessionId = ref<string | null>(null)
-  const groupMode = ref<GroupMode>('time')
+  const groupMode = ref<GroupMode>(DEFAULT_GROUP_MODE)
   const loading = ref(false)
   const error = ref<string | null>(null)
 
@@ -154,6 +186,41 @@ export const useSessionStore = defineStore('session', () => {
   }
 
   notifyRendererReady()
+
+  const normalizeGroupMode = (value: unknown): GroupMode =>
+    value === 'time' || value === 'project' ? value : DEFAULT_GROUP_MODE
+
+  const loadGroupModePreference = async (): Promise<void> => {
+    const loadVersion = groupModeUpdateVersion
+
+    try {
+      const savedGroupMode = await configPresenter.getSetting<GroupMode>(SIDEBAR_GROUP_MODE_KEY)
+      if (groupModeUpdateVersion === loadVersion) {
+        groupMode.value = normalizeGroupMode(savedGroupMode)
+      }
+    } catch (error) {
+      if (groupModeUpdateVersion === loadVersion) {
+        groupMode.value = DEFAULT_GROUP_MODE
+      }
+      console.warn('[sessionStore] Failed to load sidebar group mode:', error)
+    } finally {
+      hasLoadedGroupMode = true
+    }
+  }
+
+  const ensureGroupModeLoaded = async (): Promise<void> => {
+    if (hasLoadedGroupMode) {
+      return
+    }
+
+    if (!groupModeLoadPromise) {
+      groupModeLoadPromise = loadGroupModePreference().finally(() => {
+        groupModeLoadPromise = null
+      })
+    }
+
+    await groupModeLoadPromise
+  }
 
   // --- Getters ---
   const activeSession: ComputedRef<UISession | undefined> = computed(() =>
@@ -170,19 +237,24 @@ export const useSessionStore = defineStore('session', () => {
     loading.value = true
     error.value = null
     try {
-      const webContentsId = window.api.getWebContentsId()
+      await ensureGroupModeLoaded()
+      const webContentsId = getCurrentWebContentsId()
+      const previousActiveSessionId = activeSessionId.value
       const [result, activeSession] = await Promise.all([
-        newAgentPresenter.getSessionList(),
-        newAgentPresenter.getActiveSession(webContentsId)
+        agentSessionPresenter.getSessionList({ includeSubagents: true }),
+        agentSessionPresenter.getActiveSession(webContentsId)
       ])
       sessions.value = result.map(mapToUISession)
 
       const nextActiveSessionId = activeSession?.id ?? null
-      if (activeSessionId.value !== nextActiveSessionId) {
-        if (activeSessionId.value && activeSessionId.value !== nextActiveSessionId) {
+      if (previousActiveSessionId !== nextActiveSessionId) {
+        if (previousActiveSessionId && previousActiveSessionId !== nextActiveSessionId) {
           messageStore.clearStreamingState()
         }
         activeSessionId.value = nextActiveSessionId
+      }
+      if (previousActiveSessionId && !nextActiveSessionId && pageRouter.currentRoute === 'chat') {
+        pageRouter.goToNewThread()
       }
     } catch (e) {
       error.value = `Failed to load sessions: ${e}`
@@ -194,17 +266,9 @@ export const useSessionStore = defineStore('session', () => {
   async function createSession(input: CreateSessionInput): Promise<void> {
     error.value = null
     try {
-      const webContentsId = window.api.getWebContentsId()
-      const session = await newAgentPresenter.createSession(input, webContentsId)
+      const webContentsId = getCurrentWebContentsId()
+      const session = await agentSessionPresenter.createSession(input, webContentsId)
       activeSessionId.value = session.id
-
-      if (input.message?.trim()) {
-        messageStore.addOptimisticUserMessage(
-          session.id,
-          input.message,
-          (input.files ?? []) as MessageFile[]
-        )
-      }
 
       await fetchSessions()
       pageRouter.goToChat(session.id)
@@ -219,8 +283,8 @@ export const useSessionStore = defineStore('session', () => {
       if (activeSessionId.value && activeSessionId.value !== sessionId) {
         messageStore.clearStreamingState()
       }
-      const webContentsId = window.api.getWebContentsId()
-      await newAgentPresenter.activateSession(webContentsId, sessionId)
+      const webContentsId = getCurrentWebContentsId()
+      await agentSessionPresenter.activateSession(webContentsId, sessionId)
       activeSessionId.value = sessionId
       pageRouter.goToChat(sessionId)
     } catch (e) {
@@ -232,8 +296,8 @@ export const useSessionStore = defineStore('session', () => {
     error.value = null
     try {
       messageStore.clearStreamingState()
-      const webContentsId = window.api.getWebContentsId()
-      await newAgentPresenter.deactivateSession(webContentsId)
+      const webContentsId = getCurrentWebContentsId()
+      await agentSessionPresenter.deactivateSession(webContentsId)
       activeSessionId.value = null
       pageRouter.goToNewThread()
     } catch (e) {
@@ -244,7 +308,7 @@ export const useSessionStore = defineStore('session', () => {
   async function sendMessage(sessionId: string, content: string | SendMessageInput): Promise<void> {
     error.value = null
     try {
-      await newAgentPresenter.sendMessage(sessionId, content)
+      await agentSessionPresenter.sendMessage(sessionId, content)
     } catch (e) {
       error.value = `Failed to send message: ${e}`
     }
@@ -257,7 +321,7 @@ export const useSessionStore = defineStore('session', () => {
   ): Promise<void> {
     error.value = null
     try {
-      const updated = await newAgentPresenter.setSessionModel(sessionId, providerId, modelId)
+      const updated = await agentSessionPresenter.setSessionModel(sessionId, providerId, modelId)
       const index = sessions.value.findIndex((item) => item.id === sessionId)
       if (index >= 0) {
         sessions.value[index] = mapToUISession(updated)
@@ -271,7 +335,7 @@ export const useSessionStore = defineStore('session', () => {
   async function deleteSession(sessionId: string): Promise<void> {
     error.value = null
     try {
-      await newAgentPresenter.deleteSession(sessionId)
+      await agentSessionPresenter.deleteSession(sessionId)
       if (activeSessionId.value === sessionId) {
         activeSessionId.value = null
         pageRouter.goToNewThread()
@@ -282,6 +346,22 @@ export const useSessionStore = defineStore('session', () => {
     }
   }
 
+  async function setSessionSubagentEnabled(sessionId: string, enabled: boolean): Promise<void> {
+    error.value = null
+    try {
+      const updated = await agentSessionPresenter.setSessionSubagentEnabled(sessionId, enabled)
+      const index = sessions.value.findIndex((item) => item.id === sessionId)
+      if (index >= 0) {
+        sessions.value[index] = mapToUISession(updated)
+      } else {
+        sessions.value.push(mapToUISession(updated))
+      }
+    } catch (e) {
+      error.value = `Failed to update subagent state: ${e}`
+      throw e
+    }
+  }
+
   async function renameSession(sessionId: string, title: string): Promise<void> {
     error.value = null
     try {
@@ -289,7 +369,7 @@ export const useSessionStore = defineStore('session', () => {
       if (!normalized) {
         return
       }
-      await newAgentPresenter.renameSession(sessionId, normalized)
+      await agentSessionPresenter.renameSession(sessionId, normalized)
       const target = sessions.value.find((session) => session.id === sessionId)
       if (target) {
         target.title = normalized
@@ -303,7 +383,7 @@ export const useSessionStore = defineStore('session', () => {
   async function toggleSessionPinned(sessionId: string, pinned: boolean): Promise<void> {
     error.value = null
     try {
-      await newAgentPresenter.toggleSessionPinned(sessionId, pinned)
+      await agentSessionPresenter.toggleSessionPinned(sessionId, pinned)
       const target = sessions.value.find((session) => session.id === sessionId)
       if (target) {
         target.isPinned = pinned
@@ -317,7 +397,7 @@ export const useSessionStore = defineStore('session', () => {
   async function clearSessionMessages(sessionId: string): Promise<void> {
     error.value = null
     try {
-      await newAgentPresenter.clearSessionMessages(sessionId)
+      await agentSessionPresenter.clearSessionMessages(sessionId)
       if (activeSessionId.value === sessionId) {
         messageStore.clearStreamingState()
         await messageStore.loadMessages(sessionId)
@@ -334,7 +414,7 @@ export const useSessionStore = defineStore('session', () => {
   ): Promise<{ filename: string; content: string }> {
     error.value = null
     try {
-      const result = await newAgentPresenter.exportSession(sessionId, format)
+      const result = await agentSessionPresenter.exportSession(sessionId, format)
       const blob = new Blob([result.content], {
         type: getContentType(format)
       })
@@ -346,13 +426,31 @@ export const useSessionStore = defineStore('session', () => {
     }
   }
 
-  function toggleGroupMode(): void {
-    groupMode.value = groupMode.value === 'time' ? 'project' : 'time'
+  async function toggleGroupMode(): Promise<void> {
+    const previousMode = groupMode.value
+    groupMode.value = previousMode === 'time' ? 'project' : 'time'
+    const localVersion = ++groupModeUpdateVersion
+
+    groupModeWritePromise = groupModeWritePromise.then(async () => {
+      try {
+        await configPresenter.setSetting(SIDEBAR_GROUP_MODE_KEY, groupMode.value)
+        if (localVersion !== groupModeUpdateVersion) {
+          return
+        }
+      } catch (error) {
+        if (localVersion === groupModeUpdateVersion) {
+          groupMode.value = previousMode
+        }
+        console.warn('[sessionStore] Failed to persist sidebar group mode:', error)
+      }
+    })
+
+    await groupModeWritePromise
   }
 
   function getPinnedSessions(agentId: string | null): UISession[] {
     const pinned = sessions.value
-      .filter((session) => session.isPinned && !session.isDraft)
+      .filter((session) => isRegularSession(session) && session.isPinned && !session.isDraft)
       .sort((a, b) => b.updatedAt - a.updatedAt)
 
     if (agentId === null) return pinned
@@ -362,7 +460,7 @@ export const useSessionStore = defineStore('session', () => {
 
   function getFilteredGroups(agentId: string | null): SessionGroup[] {
     const visibleSessions = sessions.value.filter(
-      (session) => !session.isDraft && !session.isPinned
+      (session) => isRegularSession(session) && !session.isDraft && !session.isPinned
     )
     const grouped =
       groupMode.value === 'time' ? groupByTime(visibleSessions) : groupByProject(visibleSessions)
@@ -378,45 +476,31 @@ export const useSessionStore = defineStore('session', () => {
       .filter((group) => group.sessions.length > 0)
   }
 
-  // --- Event Listeners ---
-
-  window.electron.ipcRenderer.on(SESSION_EVENTS.LIST_UPDATED, () => {
-    fetchSessions()
-  })
-
-  window.electron.ipcRenderer.on(
-    SESSION_EVENTS.ACTIVATED,
-    (_: unknown, msg: { webContentsId: number; sessionId: string }) => {
-      if (msg.webContentsId === myWebContentsId) {
-        if (activeSessionId.value && activeSessionId.value !== msg.sessionId) {
-          messageStore.clearStreamingState()
-        }
-        activeSessionId.value = msg.sessionId
-        void tabPresenter.onRendererTabActivated(msg.sessionId)
-      }
-    }
-  )
-
-  window.electron.ipcRenderer.on(
-    SESSION_EVENTS.DEACTIVATED,
-    (_: unknown, msg: { webContentsId: number }) => {
-      if (msg.webContentsId === myWebContentsId) {
+  const cleanupIpcBindings = bindSessionStoreIpc({
+    webContentsId: myWebContentsId,
+    fetchSessions,
+    onActivated: (sessionId) => {
+      if (activeSessionId.value && activeSessionId.value !== sessionId) {
         messageStore.clearStreamingState()
-        activeSessionId.value = null
-        pageRouter.goToNewThread()
       }
-    }
-  )
-
-  window.electron.ipcRenderer.on(
-    SESSION_EVENTS.STATUS_CHANGED,
-    (_: unknown, msg: { sessionId: string; status: string }) => {
-      const session = sessions.value.find((s) => s.id === msg.sessionId)
+      activeSessionId.value = sessionId
+      pageRouter.goToChat(sessionId)
+      void tabPresenter.onRendererTabActivated(sessionId)
+    },
+    onDeactivated: () => {
+      messageStore.clearStreamingState()
+      activeSessionId.value = null
+      pageRouter.goToNewThread()
+    },
+    onStatusChanged: (payload) => {
+      const session = sessions.value.find((item) => item.id === payload.sessionId)
       if (session) {
-        session.status = mapSessionStatus(msg.status)
+        session.status = mapSessionStatus(payload.status)
       }
     }
-  )
+  })
+  registerStoreCleanup(cleanupIpcBindings)
+  void ensureGroupModeLoaded()
 
   return {
     sessions,
@@ -438,6 +522,7 @@ export const useSessionStore = defineStore('session', () => {
     clearSessionMessages,
     exportSession,
     deleteSession,
+    setSessionSubagentEnabled,
     toggleGroupMode,
     getPinnedSessions,
     getFilteredGroups

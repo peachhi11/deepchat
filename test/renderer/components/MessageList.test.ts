@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
 import { defineComponent } from 'vue'
 import { mount } from '@vue/test-utils'
-import type { DisplayMessage } from '@/components/chat/messageListItems'
+import type {
+  DisplayAssistantMessageBlock,
+  DisplayMessage
+} from '@/components/chat/messageListItems'
 
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({
@@ -20,9 +23,13 @@ vi.mock('@/components/message/MessageItemUser.vue', () => ({
       message: {
         type: Object,
         required: true
+      },
+      isReadOnly: {
+        type: Boolean,
+        default: false
       }
     },
-    template: '<div class="user-item">{{ message.id }}</div>'
+    template: '<div class="user-item" :data-read-only="String(isReadOnly)">{{ message.id }}</div>'
   })
 }))
 
@@ -33,9 +40,27 @@ vi.mock('@/components/message/MessageItemAssistant.vue', () => ({
       message: {
         type: Object,
         required: true
+      },
+      isReadOnly: {
+        type: Boolean,
+        default: false
       }
     },
-    template: '<div class="assistant-item">{{ message.id }}</div>'
+    template:
+      '<div class="assistant-item" :data-read-only="String(isReadOnly)">{{ message.id }}</div>'
+  })
+}))
+
+vi.mock('@/components/message/MessageBlockAction.vue', () => ({
+  default: defineComponent({
+    name: 'MessageBlockAction',
+    props: {
+      block: {
+        type: Object,
+        required: true
+      }
+    },
+    template: '<div class="rate-limit-block-stub">{{ block.action_type || "unknown" }}</div>'
   })
 }))
 
@@ -145,5 +170,37 @@ describe('MessageList', () => {
       'data-compaction-status': 'compacted'
     })
     expect(compactedWrapper.find('.compaction-divider__label--compacting').exists()).toBe(false)
+  })
+
+  it('passes read-only state down to message items', () => {
+    const wrapper = mount(MessageList, {
+      props: {
+        messages: [createMessage('u1', 'user', 1), createMessage('a1', 'assistant', 2)],
+        isReadOnly: true
+      }
+    })
+
+    expect(wrapper.find('.user-item').attributes('data-read-only')).toBe('true')
+    expect(wrapper.find('.assistant-item').attributes('data-read-only')).toBe('true')
+  })
+
+  it('renders an ephemeral rate-limit block without creating an assistant item', () => {
+    const wrapper = mount(MessageList, {
+      props: {
+        messages: [createMessage('u1', 'user', 1)],
+        conversationId: 's1',
+        ephemeralRateLimitMessageId: '__rate_limit__:s1:1',
+        ephemeralRateLimitBlock: {
+          type: 'action',
+          action_type: 'rate_limit',
+          status: 'pending',
+          timestamp: 1
+        } satisfies DisplayAssistantMessageBlock
+      }
+    })
+
+    expect(wrapper.find('[data-rate-limit-indicator="true"]').exists()).toBe(true)
+    expect(wrapper.find('.rate-limit-block-stub').text()).toBe('rate_limit')
+    expect(wrapper.findAll('.assistant-item')).toHaveLength(0)
   })
 })

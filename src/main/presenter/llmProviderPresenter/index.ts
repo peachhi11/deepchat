@@ -5,20 +5,22 @@ import {
   MODEL_META,
   OllamaModel,
   ChatMessage,
-  LLMAgentEvent,
   KeyStatus,
   LLM_EMBEDDING_ATTRS,
   ModelScopeMcpSyncOptions,
   ModelScopeMcpSyncResult,
   IConfigPresenter,
   ISQLitePresenter,
+  AcpConfigState,
+  RateLimitQueueSnapshot,
   AcpWorkdirInfo,
   AcpDebugRequest,
   AcpDebugRunResult
 } from '@shared/presenter'
 import { ProviderChange, ProviderBatchUpdate } from '@shared/provider-operations'
+import { isProviderDbBackedProvider } from '@shared/providerDbCatalog'
 import { eventBus } from '@/eventbus'
-import { CONFIG_EVENTS } from '@/events'
+import { CONFIG_EVENTS, PROVIDER_DB_EVENTS } from '@/events'
 import { BaseLLMProvider } from './baseProvider'
 import { ProviderConfig, StreamState } from './types'
 import { RateLimitManager } from './managers/rateLimitManager'
@@ -26,16 +28,28 @@ import { ProviderInstanceManager } from './managers/providerInstanceManager'
 import { ModelManager } from './managers/modelManager'
 import { OllamaManager } from './managers/ollamaManager'
 import { EmbeddingManager } from './managers/embeddingManager'
-import { AgentLoopHandler } from '../agentPresenter/loop'
 import { ModelScopeSyncManager } from './managers/modelScopeSyncManager'
 import type { OllamaProvider } from './providers/ollamaProvider'
 import { ShowResponse } from 'ollama'
-import { AcpSessionPersistence } from '../agentPresenter/acp'
+import { AcpSessionPersistence } from './acp'
 import { AcpProvider } from './providers/acpProvider'
+import type { ProviderMcpRuntimePort } from './runtimePorts'
+
+const createAbortError = (): Error => {
+  if (typeof DOMException !== 'undefined') {
+    return new DOMException('Aborted', 'AbortError')
+  }
+
+  const error = new Error('Aborted')
+  error.name = 'AbortError'
+  return error
+}
 
 export class LLMProviderPresenter implements ILlmProviderPresenter {
   private currentProviderId: string | null = null
   private readonly activeStreams: Map<string, StreamState> = new Map()
+  private readonly modelRefreshPromises: Map<string, Promise<void>> = new Map()
+  private readonly configPresenter: IConfigPresenter
   private readonly config: ProviderConfig = {
     maxConcurrentStreams: 10
   }
@@ -44,11 +58,15 @@ export class LLMProviderPresenter implements ILlmProviderPresenter {
   private readonly modelManager: ModelManager
   private readonly ollamaManager: OllamaManager
   private readonly embeddingManager: EmbeddingManager
-  private readonly agentLoopHandler: AgentLoopHandler
   private readonly modelScopeSyncManager: ModelScopeSyncManager
   private readonly acpSessionPersistence: AcpSessionPersistence
 
-  constructor(configPresenter: IConfigPresenter, sqlitePresenter: ISQLitePresenter) {
+  constructor(
+    configPresenter: IConfigPresenter,
+    sqlitePresenter: ISQLitePresenter,
+    mcpRuntime?: ProviderMcpRuntimePort
+  ) {
+    this.configPresenter = configPresenter
     this.rateLimitManager = new RateLimitManager(configPresenter)
     this.acpSessionPersistence = new AcpSessionPersistence(sqlitePresenter)
     this.providerInstanceManager = new ProviderInstanceManager({
@@ -59,7 +77,8 @@ export class LLMProviderPresenter implements ILlmProviderPresenter {
       setCurrentProviderId: (providerId) => {
         this.currentProviderId = providerId
       },
-      acpSessionPersistence: this.acpSessionPersistence
+      acpSessionPersistence: this.acpSessionPersistence,
+      mcpRuntime
     })
     this.modelManager = new ModelManager({
       configPresenter,
@@ -72,15 +91,7 @@ export class LLMProviderPresenter implements ILlmProviderPresenter {
       getProviderInstance: this.getProviderInstance.bind(this)
     })
     this.modelScopeSyncManager = new ModelScopeSyncManager({
-      configPresenter,
-      getProviderInstance: this.getProviderInstance.bind(this)
-    })
-    this.agentLoopHandler = new AgentLoopHandler({
-      configPresenter,
-      getProviderInstance: this.getProviderInstance.bind(this),
-      activeStreams: this.activeStreams,
-      canStartNewStream: this.canStartNewStream.bind(this),
-      rateLimitManager: this.rateLimitManager
+      configPresenter
     })
 
     this.rateLimitManager.initializeProviderRateLimitConfigs()
@@ -96,6 +107,10 @@ export class LLMProviderPresenter implements ILlmProviderPresenter {
 
     eventBus.on(CONFIG_EVENTS.PROVIDER_BATCH_UPDATE, (batchUpdate: ProviderBatchUpdate) => {
       this.providerInstanceManager.handleProviderBatchUpdate(batchUpdate)
+    })
+
+    eventBus.on(PROVIDER_DB_EVENTS.UPDATED, () => {
+      this.refreshEnabledProviderDbBackedModelsInBackground('provider-db-updated')
     })
   }
 
@@ -196,6 +211,16 @@ export class LLMProviderPresenter implements ILlmProviderPresenter {
     return this.rateLimitManager.getAllProviderRateLimitStatus()
   }
 
+  async executeWithRateLimit(
+    providerId: string,
+    options?: {
+      signal?: AbortSignal
+      onQueued?: (snapshot: RateLimitQueueSnapshot) => void
+    }
+  ): Promise<void> {
+    await this.rateLimitManager.executeWithRateLimit(providerId, options)
+  }
+
   isGenerating(eventId: string): boolean {
     return this.activeStreams.has(eventId)
   }
@@ -217,38 +242,6 @@ export class LLMProviderPresenter implements ILlmProviderPresenter {
       this.stopStream(eventId)
     )
     await Promise.all(promises)
-  }
-
-  private canStartNewStream(): boolean {
-    return this.activeStreams.size < this.config.maxConcurrentStreams
-  }
-
-  async *startStreamCompletion(
-    providerId: string,
-    initialMessages: ChatMessage[],
-    modelId: string,
-    eventId: string,
-    temperature: number = 0.6,
-    maxTokens: number = 4096,
-    enabledMcpTools?: string[],
-    thinkingBudget?: number,
-    reasoningEffort?: 'minimal' | 'low' | 'medium' | 'high',
-    verbosity?: 'low' | 'medium' | 'high',
-    conversationId?: string
-  ): AsyncGenerator<LLMAgentEvent, void, unknown> {
-    yield* this.agentLoopHandler.startStreamCompletion(
-      providerId,
-      initialMessages,
-      modelId,
-      eventId,
-      temperature,
-      maxTokens,
-      enabledMcpTools,
-      thinkingBudget,
-      reasoningEffort,
-      verbosity,
-      conversationId
-    )
   }
 
   // 非流式方法
@@ -293,16 +286,37 @@ export class LLMProviderPresenter implements ILlmProviderPresenter {
     messages: ChatMessage[],
     modelId: string,
     temperature?: number,
-    maxTokens?: number
+    maxTokens?: number,
+    options?: { signal?: AbortSignal }
   ): Promise<string> {
     const provider = this.getProviderInstance(providerId)
     let response = ''
+    const signal = options?.signal
+
+    if (signal?.aborted) {
+      throw createAbortError()
+    }
+
+    const completionPromise = provider.completions(messages, modelId, temperature, maxTokens)
+    const abortPromise =
+      signal &&
+      new Promise<never>((_, reject) => {
+        const onAbort = () => reject(createAbortError())
+        signal.addEventListener('abort', onAbort, { once: true })
+        completionPromise.finally(() => signal.removeEventListener('abort', onAbort))
+      })
+
     try {
-      const llmResponse = await provider.completions(messages, modelId, temperature, maxTokens)
+      const llmResponse = await (abortPromise
+        ? Promise.race([completionPromise, abortPromise])
+        : completionPromise)
       response = llmResponse.content
 
       return response
     } catch (error) {
+      if (signal?.aborted || (error instanceof Error && error.name === 'AbortError')) {
+        throw error
+      }
       console.error('Stream error:', error)
       return ''
     }
@@ -371,10 +385,58 @@ export class LLMProviderPresenter implements ILlmProviderPresenter {
     return provider.getKeyStatus()
   }
 
-  async refreshModels(providerId: string): Promise<void> {
-    try {
+  private getEnabledProviderIdsUsingProviderDb(): string[] {
+    return this.providerInstanceManager
+      .getProviders()
+      .filter((provider) => provider.enable && isProviderDbBackedProvider(provider.id))
+      .map((provider) => provider.id)
+  }
+
+  private async syncProviderDbBeforeRefresh(providerId: string): Promise<void> {
+    if (!isProviderDbBackedProvider(providerId)) {
+      return
+    }
+
+    const result = await this.configPresenter.refreshProviderDb(true)
+    if (result.status === 'error') {
+      throw new Error(result.message || 'Provider DB refresh failed')
+    }
+  }
+
+  private enqueueProviderModelRefresh(providerId: string): Promise<void> {
+    const existingRefresh = this.modelRefreshPromises.get(providerId)
+    if (existingRefresh) {
+      return existingRefresh
+    }
+
+    const refreshPromise = (async () => {
       const provider = this.getProviderInstance(providerId)
       await provider.refreshModels()
+    })().finally(() => {
+      if (this.modelRefreshPromises.get(providerId) === refreshPromise) {
+        this.modelRefreshPromises.delete(providerId)
+      }
+    })
+
+    this.modelRefreshPromises.set(providerId, refreshPromise)
+    return refreshPromise
+  }
+
+  private refreshEnabledProviderDbBackedModelsInBackground(reason: string): void {
+    for (const providerId of this.getEnabledProviderIdsUsingProviderDb()) {
+      void this.enqueueProviderModelRefresh(providerId).catch((error) => {
+        console.warn(
+          `[LLMProviderPresenter] Failed to refresh models for provider ${providerId} during ${reason}:`,
+          error
+        )
+      })
+    }
+  }
+
+  async refreshModels(providerId: string): Promise<void> {
+    try {
+      await this.syncProviderDbBeforeRefresh(providerId)
+      await this.enqueueProviderModelRefresh(providerId)
     } catch (error) {
       console.error(`Failed to refresh models for provider ${providerId}:`, error)
       const errorMessage = error instanceof Error ? error.message : String(error)
@@ -484,7 +546,7 @@ export class LLMProviderPresenter implements ILlmProviderPresenter {
     await this.acpSessionPersistence.updateWorkdir(conversationId, agentId, trimmed)
   }
 
-  async warmupAcpProcess(agentId: string, workdir: string): Promise<void> {
+  async warmupAcpProcess(agentId: string, workdir?: string): Promise<void> {
     const provider = this.getAcpProviderInstance()
     if (!provider) return
     try {
@@ -503,7 +565,7 @@ export class LLMProviderPresenter implements ILlmProviderPresenter {
 
   async getAcpProcessModes(
     agentId: string,
-    workdir: string
+    workdir?: string
   ): Promise<
     | {
         availableModes?: Array<{ id: string; name: string; description: string }>
@@ -516,6 +578,17 @@ export class LLMProviderPresenter implements ILlmProviderPresenter {
       return undefined
     }
     return provider.getProcessModes(agentId, workdir)
+  }
+
+  async getAcpProcessConfigOptions(
+    agentId: string,
+    workdir?: string
+  ): Promise<AcpConfigState | null> {
+    const provider = this.getAcpProviderInstance()
+    if (!provider) {
+      return null
+    }
+    return provider.getProcessConfigOptions(agentId, workdir)
   }
 
   async setAcpPreferredProcessMode(agentId: string, workdir: string, modeId: string) {
@@ -550,6 +623,26 @@ export class LLMProviderPresenter implements ILlmProviderPresenter {
       return null
     }
     return await provider.getSessionModes(conversationId)
+  }
+
+  async getAcpSessionConfigOptions(conversationId: string): Promise<AcpConfigState | null> {
+    const provider = this.getAcpProviderInstance()
+    if (!provider) {
+      return null
+    }
+    return await provider.getSessionConfigOptions(conversationId)
+  }
+
+  async setAcpSessionConfigOption(
+    conversationId: string,
+    configId: string,
+    value: string | boolean
+  ): Promise<AcpConfigState | null> {
+    const provider = this.getAcpProviderInstance()
+    if (!provider) {
+      throw new Error('[ACP] ACP provider not found')
+    }
+    return await provider.setSessionConfigOption(conversationId, configId, value)
   }
 
   async getAcpSessionCommands(conversationId: string): Promise<

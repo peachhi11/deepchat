@@ -2,7 +2,17 @@
 <template>
   <template v-for="(part, index) in processedContent" :key="index">
     <!-- 使用结构化渲染器替代 v-html -->
-    <MarkdownRenderer v-if="part.type === 'text'" :content="part.content" :loading="part.loading" />
+    <MarkdownRenderer
+      v-if="part.type === 'text'"
+      :content="part.content"
+      :loading="part.loading"
+      :message-id="messageId"
+      :thread-id="threadId"
+      :link-context="{
+        source: 'chat',
+        sessionId: threadId
+      }"
+    />
 
     <ArtifactThinking v-else-if="part.type === 'thinking' && part.loading" />
     <div v-else-if="part.type === 'artifact' && part.artifact" class="my-1">
@@ -26,9 +36,9 @@
 import { ref, nextTick, watch, onMounted } from 'vue'
 
 import { usePresenter } from '@/composables/usePresenter'
-import { SearchResult } from '@shared/presenter'
+import type { SearchResult } from '@shared/types/core/search'
 
-const newAgentPresenter = usePresenter('newAgentPresenter')
+const agentSessionPresenter = usePresenter('agentSessionPresenter')
 const searchResults = ref<SearchResult[]>([])
 
 import ArtifactThinking from '../artifacts/ArtifactThinking.vue'
@@ -37,10 +47,11 @@ import ToolCallPreview from '../artifacts/ToolCallPreview.vue'
 import { useBlockContent } from '@/composables/useArtifacts'
 import { useArtifactStore } from '@/stores/artifact'
 import MarkdownRenderer from '@/components/markdown/MarkdownRenderer.vue'
-import { AssistantMessageBlock } from '@shared/chat'
+import type { DisplayAssistantMessageBlock } from '@/components/chat/messageListItems'
+
 const artifactStore = useArtifactStore()
 const props = defineProps<{
-  block: AssistantMessageBlock
+  block: DisplayAssistantMessageBlock
   messageId: string
   threadId: string
   isSearchResult?: boolean
@@ -97,7 +108,7 @@ watch(
 onMounted(async () => {
   if (props.isSearchResult) {
     // TODO: remove this temporary fallback after search result loading is fully unified.
-    searchResults.value = await newAgentPresenter.getSearchResults(props.messageId)
+    searchResults.value = await agentSessionPresenter.getSearchResults(props.messageId)
   }
 })
 </script>

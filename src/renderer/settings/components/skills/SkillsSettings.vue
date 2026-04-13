@@ -14,6 +14,22 @@
           <Separator class="my-4" />
 
           <!-- Sync Status Section -->
+          <div class="mb-4 rounded-lg border px-4 py-3 flex items-start justify-between gap-4">
+            <div class="space-y-1">
+              <div class="text-sm font-medium">
+                {{ t('settings.skills.draftSuggestions.title') }}
+              </div>
+              <p class="text-xs text-muted-foreground">
+                {{ t('settings.skills.draftSuggestions.description') }}
+              </p>
+            </div>
+            <Switch
+              :model-value="draftSuggestionsEnabled"
+              @update:model-value="handleDraftSuggestionsToggle"
+            />
+          </div>
+
+          <!-- Sync Status Section -->
           <div class="mb-4">
             <SyncStatusSection @import="handleQuickImport" @import-new="handleImportNew" />
           </div>
@@ -44,6 +60,8 @@
               v-for="skill in filteredSkills"
               :key="skill.name"
               :skill="skill"
+              :extension="skillExtensions[skill.name]"
+              :scripts="skillScripts[skill.name] || []"
               @edit="openEditor(skill)"
               @delete="confirmDelete(skill)"
             />
@@ -98,6 +116,7 @@ import { storeToRefs } from 'pinia'
 import { Icon } from '@iconify/vue'
 import { Separator } from '@shadcn/components/ui/separator'
 import { ScrollArea } from '@shadcn/components/ui/scroll-area'
+import { Switch } from '@shadcn/components/ui/switch'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -110,6 +129,7 @@ import {
 } from '@shadcn/components/ui/alert-dialog'
 import { useToast } from '@/components/use-toast'
 import { useSkillsStore } from '@/stores/skillsStore'
+import { usePresenter } from '@/composables/usePresenter'
 import type { SkillMetadata } from '@shared/types/skill'
 
 import SkillsHeader from './SkillsHeader.vue'
@@ -123,11 +143,13 @@ import { SkillSyncDialog } from './SkillSyncDialog'
 const { t } = useI18n()
 const { toast } = useToast()
 const skillsStore = useSkillsStore()
+const configPresenter = usePresenter('configPresenter')
 
-const { skills, loading } = storeToRefs(skillsStore)
+const { skills, skillExtensions, skillScripts, loading } = storeToRefs(skillsStore)
 
 // Search
 const searchQuery = ref('')
+const draftSuggestionsEnabled = ref(false)
 const filteredSkills = computed(() => {
   if (!searchQuery.value) return skills.value
   const query = searchQuery.value.toLowerCase()
@@ -161,6 +183,8 @@ const deletingSkill = ref<SkillMetadata | null>(null)
 const eventCleanup = ref<(() => void) | null>(null)
 
 onMounted(async () => {
+  const enabled = await configPresenter.getSkillDraftSuggestionsEnabled?.()
+  draftSuggestionsEnabled.value = enabled ?? false
   await skillsStore.loadSkills()
   setupEventListeners()
 })
@@ -222,6 +246,12 @@ const handleDelete = async () => {
 
 const handleInstalled = () => {
   skillsStore.loadSkills()
+}
+
+const handleDraftSuggestionsToggle = async (nextValue: boolean | string) => {
+  const normalized = Boolean(nextValue)
+  draftSuggestionsEnabled.value = normalized
+  await configPresenter.setSkillDraftSuggestionsEnabled?.(normalized)
 }
 
 const handleSaved = () => {

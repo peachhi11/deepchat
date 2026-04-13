@@ -1,12 +1,16 @@
 <template>
-  <div class="flex h-full w-full flex-row overflow-hidden">
-    <div class="flex h-full min-w-0 w-0 flex-1 transition-[width] duration-200 ease-out">
-      <WelcomePage v-if="pageRouter.currentRoute === 'welcome'" />
-      <NewThreadPage v-else-if="pageRouter.currentRoute === 'newThread'" />
-      <ChatPage
-        v-else-if="pageRouter.currentRoute === 'chat' && pageRouter.chatSessionId"
-        :session-id="pageRouter.chatSessionId"
-      />
+  <div class="flex h-full min-h-0 w-full flex-row overflow-hidden">
+    <div class="flex h-full min-h-0 min-w-0 w-0 flex-1 transition-[width] duration-200 ease-out">
+      <template v-if="isReady">
+        <AgentWelcomePage
+          v-if="pageRouter.currentRoute === 'newThread' && agentStore.selectedAgentId === null"
+        />
+        <NewThreadPage v-else-if="pageRouter.currentRoute === 'newThread'" />
+        <ChatPage
+          v-else-if="pageRouter.currentRoute === 'chat' && pageRouter.chatSessionId"
+          :session-id="pageRouter.chatSessionId"
+        />
+      </template>
     </div>
 
     <ChatSidePanel
@@ -17,11 +21,11 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { onMounted, ref } from 'vue'
 import ChatSidePanel from '@/components/sidepanel/ChatSidePanel.vue'
-import WelcomePage from '@/pages/WelcomePage.vue'
 import NewThreadPage from '@/pages/NewThreadPage.vue'
 import ChatPage from '@/pages/ChatPage.vue'
+import AgentWelcomePage from '@/pages/AgentWelcomePage.vue'
 import { usePageRouterStore } from '@/stores/ui/pageRouter'
 import { useSessionStore } from '@/stores/ui/session'
 import { useAgentStore } from '@/stores/ui/agent'
@@ -33,15 +37,20 @@ const sessionStore = useSessionStore()
 const agentStore = useAgentStore()
 const projectStore = useProjectStore()
 const modelStore = useModelStore()
+const isReady = ref(false)
 
 onMounted(async () => {
-  await Promise.all([
-    pageRouter.initialize(),
-    sessionStore.fetchSessions(),
-    agentStore.fetchAgents(),
-    modelStore.initialize()
-  ])
-  projectStore.fetchProjects()
+  try {
+    await Promise.all([
+      pageRouter.initialize(),
+      sessionStore.fetchSessions(),
+      agentStore.fetchAgents(),
+      modelStore.initialize(),
+      projectStore.fetchProjects()
+    ])
+  } finally {
+    isReady.value = true
+  }
 })
 </script>
 

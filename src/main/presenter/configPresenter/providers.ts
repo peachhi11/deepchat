@@ -203,6 +203,21 @@ export const DEFAULT_PROVIDERS: LLM_PROVIDER_BASE[] = [
     }
   },
   {
+    id: 'new-api',
+    name: 'New API',
+    apiType: 'new-api',
+    apiKey: '',
+    baseUrl: 'https://www.newapi.ai',
+    enable: false,
+    websites: {
+      official: 'https://www.newapi.ai/',
+      apiKey: 'https://www.newapi.ai/token',
+      docs: 'https://www.newapi.ai/zh/docs/api',
+      models: 'https://www.newapi.ai/zh/docs/api',
+      defaultBaseUrl: 'https://www.newapi.ai'
+    }
+  },
+  {
     id: 'openai',
     name: 'OpenAI',
     apiType: 'openai',
@@ -775,6 +790,21 @@ export const DEFAULT_PROVIDERS: LLM_PROVIDER_BASE[] = [
       docs: 'https://o3.fan',
       models: 'https://o3.fan/info/models',
       defaultBaseUrl: 'https://api.o3.fan/v1'
+    }
+  },
+  {
+    id: 'novita',
+    name: 'Novita AI',
+    apiType: 'openai-completions',
+    apiKey: '',
+    baseUrl: 'https://api.novita.ai/openai',
+    enable: false,
+    websites: {
+      official: 'https://novita.ai/',
+      apiKey: 'https://novita.ai/',
+      docs: 'https://novita.ai/docs',
+      models: 'https://novita.ai/models',
+      defaultBaseUrl: 'https://api.novita.ai/openai'
     }
   }
 ]

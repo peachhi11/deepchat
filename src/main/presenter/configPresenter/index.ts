@@ -12,14 +12,21 @@ import {
   IModelConfig,
   BuiltinKnowledgeConfig,
   AcpAgentConfig,
-  AcpAgentProfile,
-  AcpBuiltinAgent,
-  AcpBuiltinAgentId,
-  AcpCustomAgent
+  AcpAgentInstallState,
+  AcpAgentState,
+  AcpManualAgent,
+  AcpRegistryAgent,
+  AcpResolvedLaunchSpec,
+  ProviderDbRefreshResult
 } from '@shared/presenter'
 import { ProviderBatchUpdate } from '@shared/provider-operations'
 import { SearchEngineTemplate } from '@shared/chat'
-import { ModelType } from '@shared/model'
+import {
+  ModelType,
+  isNewApiEndpointType,
+  resolveNewApiCapabilityProviderId,
+  type NewApiEndpointType
+} from '@shared/model'
 import {
   DEFAULT_MODEL_CAPABILITY_FALLBACKS,
   resolveModelContextLength,
@@ -30,9 +37,9 @@ import {
 import ElectronStore from 'electron-store'
 import { DEFAULT_PROVIDERS } from './providers'
 import path from 'path'
-import { app, nativeTheme, shell, ipcMain } from 'electron'
+import { app, nativeTheme, shell } from 'electron'
 import fs from 'fs'
-import { CONFIG_EVENTS, SYSTEM_EVENTS, FLOATING_BUTTON_EVENTS } from '@/events'
+import { CONFIG_EVENTS, SYSTEM_EVENTS, FLOATING_BUTTON_EVENTS, SESSION_EVENTS } from '@/events'
 import { McpConfHelper } from './mcpConfHelper'
 import { presenter } from '@/presenter'
 import { compare } from 'compare-versions'
@@ -40,7 +47,7 @@ import { defaultShortcutKey, ShortcutKeySetting } from './shortcutKeySettings'
 import { ModelConfigHelper } from './modelConfig'
 import { KnowledgeConfHelper } from './knowledgeConfHelper'
 import { providerDbLoader } from './providerDbLoader'
-import { ProviderAggregate } from '@shared/types/model-db'
+import { ProviderAggregate, ReasoningPortrait } from '@shared/types/model-db'
 import { modelCapabilities } from './modelCapabilities'
 import { ProviderHelper } from './providerHelper'
 import { ModelStatusHelper } from './modelStatusHelper'
@@ -48,19 +55,24 @@ import { ProviderModelHelper, PROVIDER_MODELS_DIR } from './providerModelHelper'
 import { SystemPromptHelper, DEFAULT_SYSTEM_PROMPT } from './systemPromptHelper'
 import { UiSettingsHelper } from './uiSettingsHelper'
 import { AcpConfHelper } from './acpConfHelper'
+import { AcpRegistryService } from './acpRegistryService'
+import { AcpLaunchSpecService } from './acpLaunchSpecService'
 import { AcpProvider } from '../llmProviderPresenter/providers/acpProvider'
-import {
-  initializeBuiltinAgent,
-  initializeCustomAgent,
-  writeToTerminal,
-  killTerminal
-} from './acpInitHelper'
-import { clearShellEnvironmentCache } from '../agentPresenter/acp'
+import { resolveAcpAgentAlias } from './acpRegistryConstants'
+import { AgentRepository, BUILTIN_DEEPCHAT_AGENT_ID } from '../agentRepository'
+import { normalizeDeepChatSubagentConfig } from '@shared/lib/deepchatSubagents'
 import type {
   HookEventName,
   HookTestResult,
   HooksNotificationsSettings
 } from '@shared/hooksNotifications'
+import type {
+  Agent,
+  AgentType,
+  CreateDeepChatAgentInput,
+  DeepChatAgentConfig,
+  UpdateDeepChatAgentInput
+} from '@shared/types/agent-interface'
 import {
   createDefaultHooksNotificationsConfig,
   normalizeHooksNotificationsConfig
@@ -84,6 +96,9 @@ interface IAppSettings {
   lastSyncTime?: number // Last sync time
   customSearchEngines?: string // Custom search engines JSON string
   copyWithCotEnabled?: boolean
+  autoCompactionEnabled?: boolean
+  autoCompactionTriggerThreshold?: number
+  autoCompactionRetainRecentPairs?: number
   loggingEnabled?: boolean // Whether logging is enabled
   floatingButtonEnabled?: boolean // Whether floating button is enabled
   default_system_prompt?: string // Default system prompt
@@ -92,9 +107,13 @@ interface IAppSettings {
   codeFontFamily?: string // Custom code font
   skillsPath?: string // Skills directory path
   enableSkills?: boolean // Skills system global toggle
+  skillDraftSuggestionsEnabled?: boolean // Whether agent may propose skill drafts after tasks
   hooksNotifications?: HooksNotificationsSettings // Hooks & notifications settings
   defaultModel?: { providerId: string; modelId: string } // Default model for new conversations
-  defaultVisionModel?: { providerId: string; modelId: string } // Default vision model for image tools
+  defaultVisionModel?: { providerId: string; modelId: string } // Legacy vision model setting for migration only
+  defaultProjectPath?: string | null
+  acpRegistryMigrationVersion?: number
+  unifiedAgentsMigrationVersion?: number
   [key: string]: unknown // Allow arbitrary keys, using unknown type instead of any
 }
 
@@ -114,6 +133,79 @@ const defaultProviders = DEFAULT_PROVIDERS.map((provider) => ({
 }))
 
 const PROVIDERS_STORE_KEY = 'providers'
+const UNIFIED_AGENTS_MIGRATION_VERSION = 1
+type AnthropicLegacyProvider = LLM_PROVIDER & { authMode?: 'apikey' | 'oauth' }
+type ModelSelection = { providerId: string; modelId: string }
+type AnthropicModelSettingKey = 'defaultModel' | 'assistantModel' | 'defaultVisionModel'
+
+const ANTHROPIC_MODEL_SETTING_KEYS: AnthropicModelSettingKey[] = [
+  'defaultModel',
+  'assistantModel',
+  'defaultVisionModel'
+]
+
+const hasLegacyAnthropicOAuthState = (provider: AnthropicLegacyProvider): boolean =>
+  Object.prototype.hasOwnProperty.call(provider, 'authMode') || provider.oauthToken !== undefined
+
+const hasAnthropicApiCredential = (
+  provider: AnthropicLegacyProvider,
+  envApiKey = process.env.ANTHROPIC_API_KEY
+): boolean => Boolean(provider.apiKey?.trim() || envApiKey?.trim())
+
+const isModelSelection = (value: unknown): value is ModelSelection => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return false
+  }
+
+  const record = value as Record<string, unknown>
+  return typeof record.providerId === 'string' && typeof record.modelId === 'string'
+}
+
+const normalizeKnownModelId = (modelId: string): string => {
+  const normalizedModelId = modelId.trim().toLowerCase()
+  return normalizedModelId.replace(/^models\//, '')
+}
+
+const normalizeKnownProviderId = (providerId: string): string =>
+  modelCapabilities.resolveProviderId(providerId.trim().toLowerCase()) ||
+  providerId.trim().toLowerCase()
+
+export const getAnthropicModelSelectionKeysToClear = (
+  settings: Partial<
+    Record<
+      AnthropicModelSettingKey | 'preferredModel',
+      { providerId: string; modelId: string } | undefined
+    >
+  >
+): AnthropicModelSettingKey[] =>
+  ANTHROPIC_MODEL_SETTING_KEYS.filter((key) => {
+    const selection = settings[key]
+    return isModelSelection(selection) && selection.providerId === 'anthropic'
+  })
+
+export const normalizeAnthropicProviderForApiOnly = (
+  provider: AnthropicLegacyProvider,
+  fallbackBaseUrl = 'https://api.anthropic.com',
+  envApiKey = process.env.ANTHROPIC_API_KEY
+): LLM_PROVIDER => {
+  if (provider.id !== 'anthropic') {
+    return provider
+  }
+
+  const shouldDisable =
+    hasLegacyAnthropicOAuthState(provider) && !hasAnthropicApiCredential(provider, envApiKey)
+
+  const normalized: AnthropicLegacyProvider = {
+    ...provider,
+    baseUrl: provider.baseUrl || fallbackBaseUrl,
+    enable: shouldDisable ? false : provider.enable
+  }
+
+  delete normalized.authMode
+  delete normalized.oauthToken
+
+  return normalized
+}
 
 export class ConfigPresenter implements IConfigPresenter {
   private store: ElectronStore<IAppSettings>
@@ -123,6 +215,8 @@ export class ConfigPresenter implements IConfigPresenter {
   private currentAppVersion: string
   private mcpConfHelper: McpConfHelper // Use MCP configuration helper
   private acpConfHelper: AcpConfHelper
+  private acpRegistryService: AcpRegistryService
+  private acpLaunchSpecService: AcpLaunchSpecService
   private modelConfigHelper: ModelConfigHelper // Model configuration helper
   private knowledgeConfHelper: KnowledgeConfHelper // Knowledge configuration helper
   private providerHelper: ProviderHelper
@@ -130,6 +224,7 @@ export class ConfigPresenter implements IConfigPresenter {
   private providerModelHelper: ProviderModelHelper
   private systemPromptHelper: SystemPromptHelper
   private uiSettingsHelper: UiSettingsHelper
+  private agentRepository: AgentRepository | null = null
   // Custom prompts cache for high-frequency read operations
   private customPromptsCache: Prompt[] | null = null
 
@@ -153,6 +248,9 @@ export class ConfigPresenter implements IConfigPresenter {
         syncFolderPath: path.join(this.userDataPath, 'sync'),
         lastSyncTime: 0,
         copyWithCotEnabled: true,
+        autoCompactionEnabled: true,
+        autoCompactionTriggerThreshold: 80,
+        autoCompactionRetainRecentPairs: 2,
         loggingEnabled: false,
         floatingButtonEnabled: false,
         fontFamily: '',
@@ -160,6 +258,7 @@ export class ConfigPresenter implements IConfigPresenter {
         default_system_prompt: '',
         skillsPath: path.join(app.getPath('home'), '.deepchat', 'skills'),
         enableSkills: true,
+        skillDraftSuggestionsEnabled: false,
         updateChannel: 'stable', // Default to stable version
         appVersion: this.currentAppVersion,
         hooksNotifications: createDefaultHooksNotificationsConfig()
@@ -218,8 +317,20 @@ export class ConfigPresenter implements IConfigPresenter {
     this.mcpConfHelper = new McpConfHelper()
 
     this.acpConfHelper = new AcpConfHelper({ mcpConfHelper: this.mcpConfHelper })
+    this.acpRegistryService = new AcpRegistryService()
+    this.acpLaunchSpecService = new AcpLaunchSpecService(
+      path.join(this.userDataPath, 'acp-registry')
+    )
     this.syncAcpProviderEnabled(this.acpConfHelper.getGlobalEnabled())
-    this.setupIpcHandlers()
+    void this.acpRegistryService
+      .initialize()
+      .then(() => {
+        this.syncRegistryAgentsToRepository()
+        this.notifyAcpAgentsChanged()
+      })
+      .catch((error) => {
+        console.error('[ACP] Failed to initialize registry service:', error)
+      })
 
     // Initialize model configuration helper
     this.modelConfigHelper = new ModelConfigHelper(this.currentAppVersion)
@@ -240,7 +351,9 @@ export class ConfigPresenter implements IConfigPresenter {
     this.initProviderModelsDir()
 
     // 初始化 Provider DB（外部聚合 JSON，本地内置为兜底）
-    providerDbLoader.initialize().catch(() => {})
+    providerDbLoader.initialize().catch((error) => {
+      console.warn('[ConfigPresenter] Failed to initialize provider DB:', error)
+    })
 
     // If application version is updated, update appVersion
     if (this.store.get('appVersion') !== this.currentAppVersion) {
@@ -253,6 +366,7 @@ export class ConfigPresenter implements IConfigPresenter {
 
     // Migrate minimax provider from OpenAI format to Anthropic format
     this.migrateMinimaxProvider()
+    this.migrateAnthropicProviderToApiOnly()
 
     const existingProviders = this.getSetting<LLM_PROVIDER[]>(PROVIDERS_STORE_KEY) || []
     const newProviders = defaultProviders.filter(
@@ -265,13 +379,147 @@ export class ConfigPresenter implements IConfigPresenter {
     }
   }
 
-  private setupIpcHandlers() {
-    ipcMain.on('acp-terminal:input', (_event, data: string) => {
-      writeToTerminal(data)
+  setAgentRepository(agentRepository: AgentRepository): void {
+    this.agentRepository = agentRepository
+    this.initializeUnifiedAgents()
+    this.migrateLegacyDefaultVisionModelToBuiltinAgent()
+  }
+
+  private getAgentRepositoryOrThrow(): AgentRepository {
+    if (!this.agentRepository) {
+      throw new Error('Unified agent repository is not attached.')
+    }
+    return this.agentRepository
+  }
+
+  private initializeUnifiedAgents(): void {
+    const repository = this.getAgentRepositoryOrThrow()
+
+    repository.ensureBuiltinDeepChatAgent({
+      name: 'DeepChat',
+      config: this.buildLegacyBuiltinDeepChatConfig()
     })
-    ipcMain.on('acp-terminal:kill', () => {
-      killTerminal()
+
+    const migratedVersion = this.getSetting<number>('unifiedAgentsMigrationVersion') ?? 0
+    if (migratedVersion < UNIFIED_AGENTS_MIGRATION_VERSION) {
+      this.acpConfHelper.getManualAgents().forEach((agent) => {
+        repository.createManualAcpAgent(agent)
+      })
+
+      this.syncRegistryAgentsToRepository(
+        this.acpConfHelper.getRegistryStates(),
+        this.acpConfHelper.getInstallStates()
+      )
+      this.store.set('unifiedAgentsMigrationVersion', UNIFIED_AGENTS_MIGRATION_VERSION)
+      return
+    }
+
+    this.syncRegistryAgentsToRepository()
+  }
+
+  private migrateLegacyDefaultVisionModelToBuiltinAgent(): void {
+    const legacySelection = this.store.get('defaultVisionModel') as unknown
+    if (legacySelection === undefined) {
+      return
+    }
+
+    const builtinVisionModel = this.getBuiltinDeepChatConfig().visionModel
+
+    if (
+      isModelSelection(legacySelection) &&
+      (!builtinVisionModel?.providerId || !builtinVisionModel?.modelId)
+    ) {
+      const providerId = legacySelection.providerId.trim()
+      const modelId = legacySelection.modelId.trim()
+
+      if (providerId && modelId) {
+        this.updateBuiltinDeepChatConfig({
+          visionModel: {
+            providerId,
+            modelId
+          }
+        })
+      }
+    }
+
+    this.store.delete('defaultVisionModel')
+    eventBus.sendToMain(CONFIG_EVENTS.SETTING_CHANGED, 'defaultVisionModel', undefined)
+  }
+
+  private buildLegacyBuiltinDeepChatConfig(): DeepChatAgentConfig {
+    const defaultModel = this.store.get('defaultModel') as ModelSelection | undefined
+    const assistantModel = this.store.get('assistantModel') as ModelSelection | undefined
+    const visionModel = this.store.get('defaultVisionModel') as ModelSelection | undefined
+    const autoCompactionEnabled = this.store.get('autoCompactionEnabled')
+    const autoCompactionTriggerThreshold = this.store.get('autoCompactionTriggerThreshold')
+    const autoCompactionRetainRecentPairs = this.store.get('autoCompactionRetainRecentPairs')
+
+    return normalizeDeepChatSubagentConfig({
+      defaultModelPreset:
+        defaultModel?.providerId && defaultModel?.modelId
+          ? {
+              providerId: defaultModel.providerId,
+              modelId: defaultModel.modelId
+            }
+          : null,
+      assistantModel:
+        assistantModel?.providerId && assistantModel?.modelId
+          ? {
+              providerId: assistantModel.providerId,
+              modelId: assistantModel.modelId
+            }
+          : null,
+      visionModel:
+        visionModel?.providerId && visionModel?.modelId
+          ? {
+              providerId: visionModel.providerId,
+              modelId: visionModel.modelId
+            }
+          : null,
+      systemPrompt: (this.store.get('default_system_prompt') as string | undefined) ?? '',
+      permissionMode: 'full_access',
+      disabledAgentTools: [],
+      autoCompactionEnabled:
+        typeof autoCompactionEnabled === 'boolean' ? autoCompactionEnabled : true,
+      autoCompactionTriggerThreshold:
+        typeof autoCompactionTriggerThreshold === 'number' ? autoCompactionTriggerThreshold : 80,
+      autoCompactionRetainRecentPairs:
+        typeof autoCompactionRetainRecentPairs === 'number' ? autoCompactionRetainRecentPairs : 2
     })
+  }
+
+  private syncRegistryAgentsToRepository(
+    legacyStateById?: Record<string, AcpAgentState>,
+    legacyInstallStateById?: Record<string, AcpAgentInstallState>
+  ): void {
+    if (!this.agentRepository) {
+      return
+    }
+
+    try {
+      this.agentRepository.syncRegistryAgents(
+        this.acpRegistryService.listAgents(),
+        legacyStateById,
+        legacyInstallStateById
+      )
+    } catch (error) {
+      console.warn('[Agents] Failed to sync ACP registry agents into sqlite:', error)
+    }
+  }
+
+  private getBuiltinDeepChatConfig(): DeepChatAgentConfig {
+    return this.agentRepository?.resolveDeepChatAgentConfig(BUILTIN_DEEPCHAT_AGENT_ID) ?? {}
+  }
+
+  private updateBuiltinDeepChatConfig(updates: Partial<DeepChatAgentConfig>): void {
+    if (!this.agentRepository) {
+      return
+    }
+
+    this.agentRepository.updateDeepChatAgent(BUILTIN_DEEPCHAT_AGENT_ID, {
+      config: updates
+    })
+    this.notifyAcpAgentsChanged()
   }
 
   private initProviderModelsDir(): void {
@@ -286,15 +534,74 @@ export class ConfigPresenter implements IConfigPresenter {
     return providerDbLoader.getDb()
   }
 
+  async refreshProviderDb(force = false): Promise<ProviderDbRefreshResult> {
+    return providerDbLoader.refreshIfNeeded(force)
+  }
+
+  private resolveNewApiCapabilityEndpointType(modelId: string): NewApiEndpointType {
+    const modelConfig = this.getModelConfig(modelId, 'new-api')
+    if (isNewApiEndpointType(modelConfig.endpointType)) {
+      return modelConfig.endpointType
+    }
+
+    const storedModel =
+      this.getProviderModels('new-api').find((model) => model.id === modelId) ??
+      this.getCustomModels('new-api').find((model) => model.id === modelId)
+
+    if (storedModel) {
+      if (isNewApiEndpointType(storedModel.endpointType)) {
+        return storedModel.endpointType
+      }
+
+      const supportedEndpointTypes =
+        storedModel.supportedEndpointTypes?.filter(isNewApiEndpointType) ?? []
+      if (
+        storedModel.type === ModelType.ImageGeneration &&
+        supportedEndpointTypes.includes('image-generation')
+      ) {
+        return 'image-generation'
+      }
+      if (supportedEndpointTypes.length > 0) {
+        return supportedEndpointTypes[0]
+      }
+      if (storedModel.type === ModelType.ImageGeneration) {
+        return 'image-generation'
+      }
+    }
+
+    return 'openai'
+  }
+
+  private resolveCapabilityProviderId(providerId: string, modelId: string): string {
+    if (providerId.trim().toLowerCase() !== 'new-api') {
+      return providerId
+    }
+
+    return resolveNewApiCapabilityProviderId(this.resolveNewApiCapabilityEndpointType(modelId))
+  }
+
   supportsReasoningCapability(providerId: string, modelId: string): boolean {
-    return modelCapabilities.supportsReasoning(providerId, modelId)
+    return modelCapabilities.supportsReasoning(
+      this.resolveCapabilityProviderId(providerId, modelId),
+      modelId
+    )
+  }
+
+  getReasoningPortrait(providerId: string, modelId: string): ReasoningPortrait | null {
+    return modelCapabilities.getReasoningPortrait(
+      this.resolveCapabilityProviderId(providerId, modelId),
+      modelId
+    )
   }
 
   getThinkingBudgetRange(
     providerId: string,
     modelId: string
   ): { min?: number; max?: number; default?: number } {
-    return modelCapabilities.getThinkingBudgetRange(providerId, modelId)
+    return modelCapabilities.getThinkingBudgetRange(
+      this.resolveCapabilityProviderId(providerId, modelId),
+      modelId
+    )
   }
 
   supportsSearchCapability(providerId: string, modelId: string): boolean {
@@ -309,22 +616,34 @@ export class ConfigPresenter implements IConfigPresenter {
   }
 
   supportsReasoningEffortCapability(providerId: string, modelId: string): boolean {
-    return modelCapabilities.supportsReasoningEffort(providerId, modelId)
+    return modelCapabilities.supportsReasoningEffort(
+      this.resolveCapabilityProviderId(providerId, modelId),
+      modelId
+    )
   }
 
   getReasoningEffortDefault(
     providerId: string,
     modelId: string
   ): 'minimal' | 'low' | 'medium' | 'high' | undefined {
-    return modelCapabilities.getReasoningEffortDefault(providerId, modelId)
+    return modelCapabilities.getReasoningEffortDefault(
+      this.resolveCapabilityProviderId(providerId, modelId),
+      modelId
+    )
   }
 
   supportsVerbosityCapability(providerId: string, modelId: string): boolean {
-    return modelCapabilities.supportsVerbosity(providerId, modelId)
+    return modelCapabilities.supportsVerbosity(
+      this.resolveCapabilityProviderId(providerId, modelId),
+      modelId
+    )
   }
 
   getVerbosityDefault(providerId: string, modelId: string): 'low' | 'medium' | 'high' | undefined {
-    return modelCapabilities.getVerbosityDefault(providerId, modelId)
+    return modelCapabilities.getVerbosityDefault(
+      this.resolveCapabilityProviderId(providerId, modelId),
+      modelId
+    )
   }
 
   private migrateConfigData(oldVersion: string | undefined): void {
@@ -512,8 +831,78 @@ export class ConfigPresenter implements IConfigPresenter {
     }
   }
 
+  private migrateAnthropicProviderToApiOnly(): void {
+    const providers = this.getProviders()
+    const defaultAnthropic = defaultProviders.find((provider) => provider.id === 'anthropic')
+    const fallbackBaseUrl = defaultAnthropic?.baseUrl || 'https://api.anthropic.com'
+    const envApiKey = process.env.ANTHROPIC_API_KEY
+    let hasChanges = false
+    let shouldClearAnthropicSelections = false
+
+    const normalizedProviders = providers.map((provider) => {
+      if (provider.id !== 'anthropic') {
+        return provider
+      }
+
+      const legacyProvider = provider as AnthropicLegacyProvider
+      const normalized = normalizeAnthropicProviderForApiOnly(
+        legacyProvider,
+        fallbackBaseUrl,
+        envApiKey
+      )
+      const shouldDisableForMissingCredential =
+        hasLegacyAnthropicOAuthState(legacyProvider) &&
+        !hasAnthropicApiCredential(legacyProvider, envApiKey)
+
+      if (
+        hasLegacyAnthropicOAuthState(legacyProvider) ||
+        normalized.enable !== legacyProvider.enable ||
+        normalized.baseUrl !== legacyProvider.baseUrl
+      ) {
+        hasChanges = true
+      }
+
+      if (shouldDisableForMissingCredential) {
+        shouldClearAnthropicSelections = true
+      }
+
+      return normalized
+    })
+
+    if (hasChanges) {
+      this.setProviders(normalizedProviders)
+    }
+
+    if (shouldClearAnthropicSelections) {
+      const keysToClear = getAnthropicModelSelectionKeysToClear({
+        defaultModel: this.getSetting('defaultModel'),
+        assistantModel: this.getSetting('assistantModel'),
+        defaultVisionModel: this.store.get('defaultVisionModel') as
+          | { providerId: string; modelId: string }
+          | undefined,
+        preferredModel: this.getSetting('preferredModel')
+      })
+
+      for (const key of keysToClear) {
+        this.store.delete(key)
+        eventBus.sendToMain(CONFIG_EVENTS.SETTING_CHANGED, key, undefined)
+      }
+    }
+  }
+
   getSetting<T>(key: string): T | undefined {
     try {
+      if (this.agentRepository) {
+        if (key === 'defaultModel') {
+          return this.getDefaultModel() as T | undefined
+        }
+        if (key === 'assistantModel') {
+          return this.getBuiltinDeepChatConfig().assistantModel as T | undefined
+        }
+        if (key === 'default_system_prompt') {
+          return this.getBuiltinDeepChatConfig().systemPrompt as T | undefined
+        }
+      }
       return this.store.get(key) as T
     } catch (error) {
       console.error(`[Config] Failed to get setting ${key}:`, error)
@@ -523,6 +912,27 @@ export class ConfigPresenter implements IConfigPresenter {
 
   setSetting<T>(key: string, value: T): void {
     try {
+      if (this.agentRepository) {
+        if (key === 'defaultModel') {
+          this.setDefaultModel(value as { providerId: string; modelId: string } | undefined)
+          return
+        }
+        if (key === 'assistantModel') {
+          this.updateBuiltinDeepChatConfig({
+            assistantModel: value as { providerId: string; modelId: string } | null | undefined
+          })
+          eventBus.sendToMain(CONFIG_EVENTS.SETTING_CHANGED, key, value)
+          return
+        }
+        if (key === 'default_system_prompt') {
+          this.updateBuiltinDeepChatConfig({
+            systemPrompt: typeof value === 'string' ? value : ''
+          })
+          eventBus.sendToMain(CONFIG_EVENTS.SETTING_CHANGED, key, value)
+          return
+        }
+      }
+
       this.store.set(key, value)
       // Trigger setting change event (main process internal use only)
       eventBus.sendToMain(CONFIG_EVENTS.SETTING_CHANGED, key, value)
@@ -604,6 +1014,10 @@ export class ConfigPresenter implements IConfigPresenter {
 
   setModelStatus(providerId: string, modelId: string, enabled: boolean): void {
     this.modelStatusHelper.setModelStatus(providerId, modelId, enabled)
+  }
+
+  ensureModelStatus(providerId: string, modelId: string, enabled: boolean): void {
+    this.modelStatusHelper.ensureModelStatus(providerId, modelId, enabled)
   }
 
   enableModel(providerId: string, modelId: string): void {
@@ -717,6 +1131,26 @@ export class ConfigPresenter implements IConfigPresenter {
     return this.providerModelHelper.getCustomModels(providerId)
   }
 
+  isKnownModel(providerId: string, modelId: string): boolean {
+    const normalizedProviderId = normalizeKnownProviderId(providerId)
+    const normalizedModelId = normalizeKnownModelId(modelId)
+
+    if (!normalizedProviderId || !normalizedModelId) {
+      return false
+    }
+
+    const hasKnownModel = (models: Array<{ id: string }> | undefined): boolean =>
+      Array.isArray(models) &&
+      models.some((model) => normalizeKnownModelId(model.id) === normalizedModelId)
+
+    return (
+      this.hasUserModelConfig(normalizedModelId, normalizedProviderId) ||
+      hasKnownModel(this.getProviderModels(normalizedProviderId)) ||
+      hasKnownModel(this.getCustomModels(normalizedProviderId)) ||
+      hasKnownModel(this.getDbProviderModels(normalizedProviderId))
+    )
+  }
+
   setCustomModels(providerId: string, models: MODEL_META[]): void {
     this.providerModelHelper.setCustomModels(providerId, models)
   }
@@ -757,6 +1191,12 @@ export class ConfigPresenter implements IConfigPresenter {
     this.setSetting('language', language)
     // Trigger language change event (need to notify all tabs)
     eventBus.sendToRenderer(CONFIG_EVENTS.LANGUAGE_CHANGED, SendTarget.ALL_WINDOWS, language)
+
+    try {
+      presenter.floatingButtonPresenter.refreshLanguage()
+    } catch (error) {
+      console.error('Failed to refresh floating widget language:', error)
+    }
   }
 
   // Get system language and match supported language list
@@ -881,6 +1321,14 @@ export class ConfigPresenter implements IConfigPresenter {
     this.setSetting('enableSkills', enabled)
   }
 
+  getSkillDraftSuggestionsEnabled(): boolean {
+    return this.getSetting<boolean>('skillDraftSuggestionsEnabled') ?? false
+  }
+
+  setSkillDraftSuggestionsEnabled(enabled: boolean): void {
+    this.setSetting('skillDraftSuggestionsEnabled', enabled)
+  }
+
   getSkillsPath(): string {
     return (
       this.getSetting<string>('skillsPath') || path.join(app.getPath('home'), '.deepchat', 'skills')
@@ -891,10 +1339,15 @@ export class ConfigPresenter implements IConfigPresenter {
     this.setSetting('skillsPath', skillsPath)
   }
 
-  getSkillSettings(): { skillsPath: string; enableSkills: boolean } {
+  getSkillSettings(): {
+    skillsPath: string
+    enableSkills: boolean
+    skillDraftSuggestionsEnabled: boolean
+  } {
     return {
       skillsPath: this.getSkillsPath(),
-      enableSkills: this.getSkillsEnabled()
+      enableSkills: this.getSkillsEnabled(),
+      skillDraftSuggestionsEnabled: this.getSkillDraftSuggestionsEnabled()
     }
   }
 
@@ -939,6 +1392,45 @@ export class ConfigPresenter implements IConfigPresenter {
 
   setAutoScrollEnabled(enabled: boolean): void {
     this.uiSettingsHelper.setAutoScrollEnabled(enabled)
+  }
+
+  getAutoCompactionEnabled(): boolean {
+    return (
+      this.getBuiltinDeepChatConfig().autoCompactionEnabled ??
+      this.uiSettingsHelper.getAutoCompactionEnabled()
+    )
+  }
+
+  setAutoCompactionEnabled(enabled: boolean): void {
+    this.updateBuiltinDeepChatConfig({
+      autoCompactionEnabled: Boolean(enabled)
+    })
+  }
+
+  getAutoCompactionTriggerThreshold(): number {
+    return (
+      this.getBuiltinDeepChatConfig().autoCompactionTriggerThreshold ??
+      this.uiSettingsHelper.getAutoCompactionTriggerThreshold()
+    )
+  }
+
+  setAutoCompactionTriggerThreshold(threshold: number): void {
+    this.updateBuiltinDeepChatConfig({
+      autoCompactionTriggerThreshold: threshold
+    })
+  }
+
+  getAutoCompactionRetainRecentPairs(): number {
+    return (
+      this.getBuiltinDeepChatConfig().autoCompactionRetainRecentPairs ??
+      this.uiSettingsHelper.getAutoCompactionRetainRecentPairs()
+    )
+  }
+
+  setAutoCompactionRetainRecentPairs(count: number): void {
+    this.updateBuiltinDeepChatConfig({
+      autoCompactionRetainRecentPairs: count
+    })
   }
 
   getContentProtectionEnabled(): boolean {
@@ -1089,194 +1581,326 @@ export class ConfigPresenter implements IConfigPresenter {
     this.notifyAcpAgentsChanged()
   }
 
-  async getAcpUseBuiltinRuntime(): Promise<boolean> {
-    return this.acpConfHelper.getUseBuiltinRuntime()
-  }
-
-  async setAcpUseBuiltinRuntime(enabled: boolean): Promise<void> {
-    this.acpConfHelper.setUseBuiltinRuntime(enabled)
-    // Clear shell environment cache when useBuiltinRuntime changes
-    // This ensures fresh environment variables are fetched if user switches back to system runtime
-    clearShellEnvironmentCache()
-  }
-
   // ===================== ACP configuration methods =====================
-  async getAcpAgents(): Promise<AcpAgentConfig[]> {
-    return this.acpConfHelper.getEnabledAgents()
+  async listAcpRegistryAgents(): Promise<AcpRegistryAgent[]> {
+    this.syncRegistryAgentsToRepository()
+    const registryAgents = this.acpRegistryService.listAgents()
+
+    return registryAgents.map((agent) => {
+      const overlay = this.agentRepository?.getAcpRegistryOverlay(agent.id) ?? {
+        enabled: this.acpConfHelper.getRegistryStates()[agent.id]?.enabled ?? false,
+        envOverride: this.acpConfHelper.getRegistryStates()[agent.id]?.envOverride,
+        installState: this.acpConfHelper.getInstallStates()[agent.id] ?? null
+      }
+      return {
+        ...agent,
+        enabled: overlay.enabled,
+        envOverride: overlay.envOverride,
+        installState: overlay.installState ?? null
+      }
+    })
   }
 
-  async setAcpAgents(agents: AcpAgentConfig[]): Promise<AcpAgentConfig[]> {
-    const sanitizedAgents = this.acpConfHelper.replaceWithLegacyAgents(agents)
-    this.handleAcpAgentsMutated(sanitizedAgents.map((agent) => agent.id))
-    return sanitizedAgents
+  async refreshAcpRegistry(force = true): Promise<AcpRegistryAgent[]> {
+    await this.acpRegistryService.refresh(force)
+    this.syncRegistryAgentsToRepository()
+    const agents = await this.listAcpRegistryAgents()
+    this.notifyAcpAgentsChanged()
+    return agents
   }
 
-  async addAcpAgent(agent: Omit<AcpAgentConfig, 'id'> & { id?: string }): Promise<AcpAgentConfig> {
-    const created = this.acpConfHelper.addLegacyAgent(agent)
-    this.handleAcpAgentsMutated([created.id])
-    return created
+  async getAcpRegistryIconMarkup(agentId: string, iconUrl?: string): Promise<string | null> {
+    return await this.acpRegistryService.getIconMarkup(agentId, iconUrl)
   }
 
-  async updateAcpAgent(
-    agentId: string,
-    updates: Partial<Omit<AcpAgentConfig, 'id'>>
-  ): Promise<AcpAgentConfig | null> {
-    const updated = this.acpConfHelper.updateLegacyAgent(agentId, updates)
-    if (updated) {
-      this.handleAcpAgentsMutated([agentId])
+  async getAcpAgentState(agentId: string): Promise<AcpAgentState | null> {
+    return this.agentRepository?.getAcpAgentState(resolveAcpAgentAlias(agentId)) ?? null
+  }
+
+  async setAcpAgentEnabled(agentId: string, enabled: boolean): Promise<void> {
+    const resolvedId = resolveAcpAgentAlias(agentId)
+    this.getAgentRepositoryOrThrow().setAgentEnabled(resolvedId, enabled)
+    this.handleAcpAgentsMutated([resolvedId])
+
+    if (enabled) {
+      void this.ensureAcpAgentInstalled(resolvedId).catch((error) => {
+        console.warn(`[ACP] Failed to preinstall registry agent ${resolvedId}:`, error)
+      })
     }
-    return updated
   }
 
-  async removeAcpAgent(agentId: string): Promise<boolean> {
-    const removed = this.acpConfHelper.removeLegacyAgent(agentId)
-    if (removed) {
-      this.handleAcpAgentsMutated([agentId])
+  async setAcpAgentEnvOverride(agentId: string, env: Record<string, string>): Promise<void> {
+    const resolvedId = resolveAcpAgentAlias(agentId)
+    const installState = this.getAgentRepositoryOrThrow().getAgentInstallState(resolvedId)
+    if (installState?.status !== 'installed') {
+      throw new Error(`ACP registry agent is not installed: ${resolvedId}`)
     }
-    return removed
+    this.getAgentRepositoryOrThrow().setAgentEnvOverride(resolvedId, env)
+    this.handleAcpAgentsMutated([resolvedId])
   }
 
-  async getAcpBuiltinAgents(): Promise<AcpBuiltinAgent[]> {
-    return this.acpConfHelper.getBuiltins()
-  }
+  async ensureAcpAgentInstalled(agentId: string): Promise<AcpAgentInstallState> {
+    const registryAgent = this.getRegistryAgentOrThrow(agentId)
+    const currentState = this.getAgentRepositoryOrThrow().getAgentInstallState(registryAgent.id)
+    const installingState: AcpAgentInstallState = {
+      status: 'installing',
+      version: registryAgent.version,
+      distributionType:
+        this.acpLaunchSpecService.selectRegistryDistribution(registryAgent)?.type ?? undefined,
+      lastCheckedAt: Date.now(),
+      installedAt: currentState?.installedAt ?? null,
+      installDir: currentState?.installDir ?? null,
+      error: null
+    }
+    this.getAgentRepositoryOrThrow().setAgentInstallState(registryAgent.id, installingState)
+    this.notifyAcpAgentsChanged()
 
-  async getAcpCustomAgents(): Promise<AcpCustomAgent[]> {
-    return this.acpConfHelper.getCustoms()
-  }
-
-  /**
-   * Initialize an ACP agent with terminal output streaming
-   */
-  async initializeAcpAgent(agentId: string, isBuiltin: boolean): Promise<void> {
-    const useBuiltinRuntime = await this.getAcpUseBuiltinRuntime()
-
-    // Get npm and uv registry from MCP presenter
-    let npmRegistry: string | null = null
-    let uvRegistry: string | null = null
     try {
-      const mcpPresenter = presenter.mcpPresenter
-      if (mcpPresenter) {
-        npmRegistry = mcpPresenter.getNpmRegistry?.() ?? null
-        uvRegistry = mcpPresenter.getUvRegistry?.() ?? null
-      }
-    } catch (error) {
-      console.warn('[ACP Init] Failed to get registry from MCP presenter:', error)
-    }
-
-    // Get settings window webContents for streaming output
-    const windowPresenter = presenter.windowPresenter as any
-    const settingsWindow = windowPresenter?.settingsWindow
-    const webContents =
-      settingsWindow && !settingsWindow.isDestroyed() ? settingsWindow.webContents : undefined
-
-    if (isBuiltin) {
-      // Get builtin agent and its active profile
-      const builtins = await this.getAcpBuiltinAgents()
-      const agent = builtins.find((a) => a.id === agentId)
-      if (!agent) {
-        throw new Error(`Built-in agent not found: ${agentId}`)
-      }
-
-      const activeProfile = agent.profiles.find((p) => p.id === agent.activeProfileId)
-      if (!activeProfile) {
-        throw new Error(`No active profile found for agent: ${agentId}`)
-      }
-
-      const result = await initializeBuiltinAgent(
-        agentId as AcpBuiltinAgentId,
-        activeProfile,
-        useBuiltinRuntime,
-        npmRegistry,
-        uvRegistry,
-        webContents
+      const installedState = await this.acpLaunchSpecService.ensureRegistryAgentInstalled(
+        registryAgent,
+        currentState
       )
-      // If initialization returns null, it means dependencies are missing
-      // The event has already been sent to frontend, just return without error
-      if (result === null) {
-        return
+      this.getAgentRepositoryOrThrow().setAgentInstallState(registryAgent.id, installedState)
+      this.notifyAcpAgentsChanged()
+      return installedState
+    } catch (error) {
+      const failedState: AcpAgentInstallState = {
+        status: 'error',
+        version: registryAgent.version,
+        distributionType:
+          this.acpLaunchSpecService.selectRegistryDistribution(registryAgent)?.type ?? undefined,
+        lastCheckedAt: Date.now(),
+        installedAt: currentState?.installedAt ?? null,
+        installDir: currentState?.installDir ?? null,
+        error: error instanceof Error ? error.message : String(error)
       }
-    } else {
-      // Get custom agent
-      const customs = await this.getAcpCustomAgents()
-      const agent = customs.find((a) => a.id === agentId)
-      if (!agent) {
-        throw new Error(`Custom agent not found: ${agentId}`)
+      this.getAgentRepositoryOrThrow().setAgentInstallState(registryAgent.id, failedState)
+      this.notifyAcpAgentsChanged()
+      throw error
+    }
+  }
+
+  async repairAcpAgent(agentId: string): Promise<AcpAgentInstallState> {
+    const registryAgent = this.getRegistryAgentOrThrow(agentId)
+    const currentState = this.getAgentRepositoryOrThrow().getAgentInstallState(registryAgent.id)
+    const repairingState: AcpAgentInstallState = {
+      status: 'installing',
+      version: registryAgent.version,
+      distributionType:
+        this.acpLaunchSpecService.selectRegistryDistribution(registryAgent)?.type ?? undefined,
+      lastCheckedAt: Date.now(),
+      installedAt: currentState?.installedAt ?? null,
+      installDir: currentState?.installDir ?? null,
+      error: null
+    }
+    this.getAgentRepositoryOrThrow().setAgentInstallState(registryAgent.id, repairingState)
+    this.notifyAcpAgentsChanged()
+
+    try {
+      const installedState = await this.acpLaunchSpecService.ensureRegistryAgentInstalled(
+        registryAgent,
+        currentState,
+        { repair: true }
+      )
+      this.getAgentRepositoryOrThrow().setAgentInstallState(registryAgent.id, installedState)
+      this.handleAcpAgentsMutated([registryAgent.id])
+      return installedState
+    } catch (error) {
+      const failedState: AcpAgentInstallState = {
+        status: 'error',
+        version: registryAgent.version,
+        distributionType:
+          this.acpLaunchSpecService.selectRegistryDistribution(registryAgent)?.type ?? undefined,
+        lastCheckedAt: Date.now(),
+        installedAt: currentState?.installedAt ?? null,
+        installDir: currentState?.installDir ?? null,
+        error: error instanceof Error ? error.message : String(error)
       }
-
-      await initializeCustomAgent(agent, useBuiltinRuntime, npmRegistry, uvRegistry, webContents)
+      this.getAgentRepositoryOrThrow().setAgentInstallState(registryAgent.id, failedState)
+      this.notifyAcpAgentsChanged()
+      throw error
     }
   }
 
-  async addAcpBuiltinProfile(
-    agentId: AcpBuiltinAgentId,
-    profile: Omit<AcpAgentProfile, 'id'>,
-    options?: { activate?: boolean }
-  ): Promise<AcpAgentProfile> {
-    const created = this.acpConfHelper.addBuiltinProfile(agentId, profile, options)
-    this.handleAcpAgentsMutated([agentId])
-    return created
-  }
+  async uninstallAcpRegistryAgent(agentId: string): Promise<void> {
+    const resolvedId = resolveAcpAgentAlias(agentId)
+    const registryAgent = this.getRegistryAgentOrThrow(resolvedId)
+    const currentState = this.getAgentRepositoryOrThrow().getAgentInstallState(registryAgent.id)
 
-  async updateAcpBuiltinProfile(
-    agentId: AcpBuiltinAgentId,
-    profileId: string,
-    updates: Partial<Omit<AcpAgentProfile, 'id'>>
-  ): Promise<AcpAgentProfile | null> {
-    const updated = this.acpConfHelper.updateBuiltinProfile(agentId, profileId, updates)
-    if (updated) {
-      this.handleAcpAgentsMutated([agentId])
+    await this.acpLaunchSpecService.uninstallRegistryAgent(registryAgent, currentState)
+
+    const uninstalledState: AcpAgentInstallState = {
+      status: 'not_installed',
+      version: registryAgent.version,
+      distributionType:
+        this.acpLaunchSpecService.selectRegistryDistribution(registryAgent)?.type ?? undefined,
+      lastCheckedAt: Date.now(),
+      installedAt: null,
+      installDir: null,
+      error: null
     }
-    return updated
-  }
 
-  async removeAcpBuiltinProfile(agentId: AcpBuiltinAgentId, profileId: string): Promise<boolean> {
-    const removed = this.acpConfHelper.removeBuiltinProfile(agentId, profileId)
-    if (removed) {
-      this.handleAcpAgentsMutated([agentId])
+    const updated = this.getAgentRepositoryOrThrow().clearRegistryAcpAgentInstallation(
+      registryAgent.id,
+      uninstalledState
+    )
+    if (!updated) {
+      throw new Error(`ACP registry agent not found: ${registryAgent.id}`)
     }
-    return removed
+
+    this.handleAcpAgentsMutated([registryAgent.id])
   }
 
-  async setAcpBuiltinActiveProfile(agentId: AcpBuiltinAgentId, profileId: string): Promise<void> {
-    this.acpConfHelper.setBuiltinActiveProfile(agentId, profileId)
-    this.handleAcpAgentsMutated([agentId])
+  async getAcpAgentInstallStatus(agentId: string): Promise<AcpAgentInstallState | null> {
+    return this.agentRepository?.getAgentInstallState(resolveAcpAgentAlias(agentId)) ?? null
   }
 
-  async setAcpBuiltinEnabled(agentId: AcpBuiltinAgentId, enabled: boolean): Promise<void> {
-    this.acpConfHelper.setBuiltinEnabled(agentId, enabled)
-    this.handleAcpAgentsMutated([agentId])
+  async listManualAcpAgents(): Promise<AcpManualAgent[]> {
+    return this.getAgentRepositoryOrThrow().listManualAcpAgents()
   }
 
-  async addCustomAcpAgent(
-    agent: Omit<AcpCustomAgent, 'id' | 'enabled'> & { id?: string; enabled?: boolean }
-  ): Promise<AcpCustomAgent> {
-    const created = this.acpConfHelper.addCustomAgent(agent)
+  async addManualAcpAgent(
+    agent: Omit<AcpManualAgent, 'id' | 'source'> & { id?: string }
+  ): Promise<AcpManualAgent> {
+    const created = this.getAgentRepositoryOrThrow().createManualAcpAgent(agent)
     this.handleAcpAgentsMutated([created.id])
     return created
   }
 
-  async updateCustomAcpAgent(
+  async updateManualAcpAgent(
     agentId: string,
-    updates: Partial<Omit<AcpCustomAgent, 'id'>>
-  ): Promise<AcpCustomAgent | null> {
-    const updated = this.acpConfHelper.updateCustomAgent(agentId, updates)
+    updates: Partial<Omit<AcpManualAgent, 'id' | 'source'>>
+  ): Promise<AcpManualAgent | null> {
+    const updated = this.getAgentRepositoryOrThrow().updateManualAcpAgent(agentId, updates)
     if (updated) {
-      this.handleAcpAgentsMutated([agentId])
+      this.handleAcpAgentsMutated([updated.id])
     }
     return updated
   }
 
-  async removeCustomAcpAgent(agentId: string): Promise<boolean> {
-    const removed = this.acpConfHelper.removeCustomAgent(agentId)
+  async removeManualAcpAgent(agentId: string): Promise<boolean> {
+    const removed = this.getAgentRepositoryOrThrow().removeManualAcpAgent(agentId)
     if (removed) {
       this.handleAcpAgentsMutated([agentId])
     }
     return removed
   }
 
-  async setCustomAcpAgentEnabled(agentId: string, enabled: boolean): Promise<void> {
-    this.acpConfHelper.setCustomAgentEnabled(agentId, enabled)
-    this.handleAcpAgentsMutated([agentId])
+  async getAcpAgents(): Promise<AcpAgentConfig[]> {
+    const acpEnabled = this.acpConfHelper.getGlobalEnabled()
+    if (!acpEnabled) {
+      return []
+    }
+
+    const [registryAgents, manualAgents] = await Promise.all([
+      this.listAcpRegistryAgents(),
+      this.listManualAcpAgents()
+    ])
+
+    const enabledRegistryAgents = registryAgents
+      .filter((agent) => agent.enabled && agent.installState?.status === 'installed')
+      .map((agent) => this.buildRegistryAgentConfig(agent))
+
+    const enabledManualAgents = manualAgents
+      .filter((agent) => agent.enabled)
+      .map((agent) => this.buildManualAgentConfig(agent))
+
+    return [...enabledRegistryAgents, ...enabledManualAgents]
+  }
+
+  async resolveAcpLaunchSpec(agentId: string, _workdir?: string): Promise<AcpResolvedLaunchSpec> {
+    const resolvedId = resolveAcpAgentAlias(agentId)
+    const manualAgent = this.getAgentRepositoryOrThrow().getManualAcpAgent(resolvedId)
+    if (manualAgent) {
+      return this.acpLaunchSpecService.resolveManualLaunchSpec(manualAgent)
+    }
+
+    const registryAgent = this.getRegistryAgentOrThrow(resolvedId)
+    const installState = this.getAgentRepositoryOrThrow().getAgentInstallState(registryAgent.id)
+    const launchSpec = await this.acpLaunchSpecService.resolveRegistryLaunchSpec(
+      registryAgent,
+      installState
+    )
+
+    const nextInstallState: AcpAgentInstallState = {
+      status: 'installed',
+      distributionType: launchSpec.distributionType,
+      version: launchSpec.version,
+      lastCheckedAt: Date.now(),
+      installedAt: installState?.installedAt ?? Date.now(),
+      installDir: launchSpec.installDir ?? null,
+      error: null
+    }
+    this.getAgentRepositoryOrThrow().setAgentInstallState(resolvedId, nextInstallState)
+    return launchSpec
+  }
+
+  async getAcpSharedMcpSelections(): Promise<string[]> {
+    return this.acpConfHelper.getSharedMcpSelections()
+  }
+
+  async setAcpSharedMcpSelections(mcpIds: string[]): Promise<void> {
+    await this.acpConfHelper.setSharedMcpSelections(mcpIds)
+    this.handleAcpAgentsMutated()
+  }
+
+  async listAgents(): Promise<Agent[]> {
+    return this.getAgentRepositoryOrThrow().listAgents()
+  }
+
+  async getAgent(agentId: string): Promise<Agent | null> {
+    return this.getAgentRepositoryOrThrow().getAgent(agentId)
+  }
+
+  async getAgentType(agentId: string): Promise<AgentType | null> {
+    return this.getAgentRepositoryOrThrow().getAgentType(agentId)
+  }
+
+  async getDeepChatAgentConfig(agentId: string): Promise<DeepChatAgentConfig | null> {
+    return this.getAgentRepositoryOrThrow().getDeepChatAgentConfig(agentId)
+  }
+
+  async resolveDeepChatAgentConfig(agentId: string): Promise<DeepChatAgentConfig> {
+    return this.getAgentRepositoryOrThrow().resolveDeepChatAgentConfig(
+      agentId || BUILTIN_DEEPCHAT_AGENT_ID
+    )
+  }
+
+  async agentSupportsCapability(agentId: string, capability: 'vision'): Promise<boolean> {
+    if (capability !== 'vision') {
+      return false
+    }
+
+    const agentConfig = await this.resolveDeepChatAgentConfig(agentId)
+    const providerId = agentConfig.visionModel?.providerId?.trim()
+    const modelId = agentConfig.visionModel?.modelId?.trim()
+
+    return Boolean(providerId && modelId && this.getModelConfig(modelId, providerId)?.vision)
+  }
+
+  async createDeepChatAgent(input: CreateDeepChatAgentInput): Promise<Agent> {
+    const created = this.getAgentRepositoryOrThrow().createDeepChatAgent(input)
+    this.notifyAcpAgentsChanged()
+    return created
+  }
+
+  async updateDeepChatAgent(
+    agentId: string,
+    updates: UpdateDeepChatAgentInput
+  ): Promise<Agent | null> {
+    const updated = this.getAgentRepositoryOrThrow().updateDeepChatAgent(agentId, updates)
+    if (updated) {
+      this.notifyAcpAgentsChanged()
+    }
+    return updated
+  }
+
+  async deleteDeepChatAgent(agentId: string): Promise<boolean> {
+    const removed = this.getAgentRepositoryOrThrow().deleteDeepChatAgent(agentId)
+    if (removed) {
+      this.notifyAcpAgentsChanged()
+    }
+    return removed
   }
 
   async getAgentMcpSelections(agentId: string, isBuiltin?: boolean): Promise<string[]> {
@@ -1289,17 +1913,54 @@ export class ConfigPresenter implements IConfigPresenter {
     mcpIds: string[]
   ): Promise<void> {
     await this.acpConfHelper.setAgentMcpSelections(agentId, isBuiltin, mcpIds)
-    this.handleAcpAgentsMutated([agentId])
+    this.handleAcpAgentsMutated()
   }
 
   async addMcpToAgent(agentId: string, isBuiltin: boolean, mcpId: string): Promise<void> {
     await this.acpConfHelper.addMcpToAgent(agentId, isBuiltin, mcpId)
-    this.handleAcpAgentsMutated([agentId])
+    this.handleAcpAgentsMutated()
   }
 
   async removeMcpFromAgent(agentId: string, isBuiltin: boolean, mcpId: string): Promise<void> {
     await this.acpConfHelper.removeMcpFromAgent(agentId, isBuiltin, mcpId)
-    this.handleAcpAgentsMutated([agentId])
+    this.handleAcpAgentsMutated()
+  }
+
+  private buildRegistryAgentConfig(agent: AcpRegistryAgent): AcpAgentConfig {
+    const preview = this.acpLaunchSpecService.buildRegistryPreview(agent)
+    return {
+      id: agent.id,
+      name: agent.name,
+      command: preview.command,
+      args: preview.args,
+      description: agent.description,
+      icon: agent.icon,
+      source: 'registry',
+      installState: agent.installState ?? null
+    }
+  }
+
+  private buildManualAgentConfig(agent: AcpManualAgent): AcpAgentConfig {
+    return {
+      id: agent.id,
+      name: agent.name,
+      command: agent.command,
+      args: agent.args,
+      env: agent.env,
+      description: agent.description,
+      icon: agent.icon,
+      source: 'manual',
+      installState: null
+    }
+  }
+
+  private getRegistryAgentOrThrow(agentId: string): AcpRegistryAgent {
+    const resolvedId = resolveAcpAgentAlias(agentId)
+    const agent = this.acpRegistryService.getAgent(resolvedId)
+    if (!agent) {
+      throw new Error(`ACP registry agent not found: ${resolvedId}`)
+    }
+    return agent
   }
 
   private handleAcpAgentsMutated(agentIds?: string[]) {
@@ -1329,6 +1990,8 @@ export class ConfigPresenter implements IConfigPresenter {
   private notifyAcpAgentsChanged() {
     console.log('[ACP] notifyAcpAgentsChanged: sending MODEL_LIST_CHANGED event for provider "acp"')
     eventBus.sendToRenderer(CONFIG_EVENTS.MODEL_LIST_CHANGED, SendTarget.ALL_WINDOWS, 'acp')
+    eventBus.sendToRenderer(CONFIG_EVENTS.AGENTS_CHANGED, SendTarget.ALL_WINDOWS)
+    eventBus.sendToRenderer(SESSION_EVENTS.LIST_UPDATED, SendTarget.ALL_WINDOWS)
   }
 
   // Provide getMcpConfHelper method to get MCP configuration helper
@@ -1445,6 +2108,12 @@ export class ConfigPresenter implements IConfigPresenter {
       // 只有当主题设置为 system 时，才需要通知渲染进程系统主题变化
       if (nativeTheme.themeSource === 'system') {
         eventBus.sendToMain(SYSTEM_EVENTS.SYSTEM_THEME_UPDATED, nativeTheme.shouldUseDarkColors)
+
+        try {
+          void presenter.floatingButtonPresenter.refreshTheme()
+        } catch (error) {
+          console.error('Failed to refresh floating widget theme:', error)
+        }
       }
     })
   }
@@ -1454,6 +2123,13 @@ export class ConfigPresenter implements IConfigPresenter {
     this.setSetting('appTheme', theme)
     // 通知所有窗口主题已更改
     eventBus.sendToRenderer(CONFIG_EVENTS.THEME_CHANGED, SendTarget.ALL_WINDOWS, theme)
+
+    try {
+      void presenter.floatingButtonPresenter.refreshTheme()
+    } catch (error) {
+      console.error('Failed to refresh floating widget theme:', error)
+    }
+
     return nativeTheme.shouldUseDarkColors
   }
 
@@ -1803,19 +2479,40 @@ export class ConfigPresenter implements IConfigPresenter {
   }
 
   getDefaultModel(): { providerId: string; modelId: string } | undefined {
-    return this.getSetting<{ providerId: string; modelId: string }>('defaultModel')
+    const selection = this.getBuiltinDeepChatConfig().defaultModelPreset
+    if (selection?.providerId && selection?.modelId) {
+      return {
+        providerId: selection.providerId,
+        modelId: selection.modelId
+      }
+    }
+    return this.store.get('defaultModel') as { providerId: string; modelId: string } | undefined
   }
 
   setDefaultModel(model: { providerId: string; modelId: string } | undefined): void {
-    this.setSetting('defaultModel', model)
+    this.updateBuiltinDeepChatConfig({
+      defaultModelPreset:
+        model?.providerId && model?.modelId
+          ? {
+              providerId: model.providerId,
+              modelId: model.modelId
+            }
+          : null
+    })
+    eventBus.sendToMain(CONFIG_EVENTS.SETTING_CHANGED, 'defaultModel', model)
   }
 
-  getDefaultVisionModel(): { providerId: string; modelId: string } | undefined {
-    return this.getSetting<{ providerId: string; modelId: string }>('defaultVisionModel')
+  getDefaultProjectPath(): string | null {
+    const path = this.getSetting<string | null>('defaultProjectPath')
+    return path?.trim() ? path.trim() : null
   }
 
-  setDefaultVisionModel(model: { providerId: string; modelId: string } | undefined): void {
-    this.setSetting('defaultVisionModel', model)
+  setDefaultProjectPath(projectPath: string | null): void {
+    const normalized = projectPath?.trim() ? projectPath.trim() : null
+    this.setSetting('defaultProjectPath', normalized)
+    eventBus.sendToRenderer(CONFIG_EVENTS.DEFAULT_PROJECT_PATH_CHANGED, SendTarget.ALL_WINDOWS, {
+      path: normalized
+    })
   }
 }
 

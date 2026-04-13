@@ -42,7 +42,9 @@ export const CONFIG_EVENTS = {
   FONT_SIZE_CHANGED: 'config:font-size-changed', // 字体大小变更事件
   DEFAULT_SYSTEM_PROMPT_CHANGED: 'config:default-system-prompt-changed', // Default system prompt changed event
   CUSTOM_PROMPTS_CHANGED: 'config:custom-prompts-changed', // 自定义提示词变更事件
-  NOWLEDGE_MEM_CONFIG_UPDATED: 'config:nowledge-mem-config-updated' // Nowledge-mem configuration updated event
+  NOWLEDGE_MEM_CONFIG_UPDATED: 'config:nowledge-mem-config-updated', // Nowledge-mem configuration updated event
+  DEFAULT_PROJECT_PATH_CHANGED: 'config:default-project-path-changed',
+  AGENTS_CHANGED: 'config:agents-changed'
 }
 
 // Provider DB（聚合 JSON）相关事件
@@ -77,7 +79,8 @@ export const SESSION_EVENTS = {
   ACTIVATED: 'session:activated',
   DEACTIVATED: 'session:deactivated',
   STATUS_CHANGED: 'session:status-changed',
-  COMPACTION_UPDATED: 'session:compaction-updated'
+  COMPACTION_UPDATED: 'session:compaction-updated',
+  PENDING_INPUTS_UPDATED: 'session:pending-inputs-updated'
 }
 
 // 系统相关事件
@@ -118,7 +121,10 @@ export const WINDOW_EVENTS = {
 
 // Settings related events
 export const SETTINGS_EVENTS = {
-  NAVIGATE: 'settings:navigate'
+  READY: 'settings:ready',
+  NAVIGATE: 'settings:navigate',
+  CHECK_FOR_UPDATES: 'settings:check-for-updates',
+  PROVIDER_INSTALL: 'settings:provider-install'
 }
 
 // ollama 相关事件
@@ -180,6 +186,9 @@ export const SHORTCUT_EVENTS = {
   ZOOM_RESUME: 'shortcut:zoom-resume',
   CREATE_NEW_WINDOW: 'shortcut:create-new-window',
   CREATE_NEW_CONVERSATION: 'shortcut:create-new-conversation',
+  TOGGLE_SPOTLIGHT: 'shortcut:toggle-spotlight',
+  TOGGLE_SIDEBAR: 'shortcut:toggle-sidebar',
+  TOGGLE_WORKSPACE: 'shortcut:toggle-workspace',
   GO_SETTINGS: 'shortcut:go-settings',
   CLEAN_CHAT_HISTORY: 'shortcut:clean-chat-history',
   DELETE_CONVERSATION: 'shortcut:delete-conversation'
@@ -198,6 +207,7 @@ export const TAB_EVENTS = {
 
 // Yo Browser 相关事件
 export const YO_BROWSER_EVENTS = {
+  OPEN_REQUESTED: 'yo-browser:open-requested',
   WINDOW_CREATED: 'yo-browser:window-created',
   WINDOW_UPDATED: 'yo-browser:window-updated',
   WINDOW_CLOSED: 'yo-browser:window-closed',
@@ -212,11 +222,6 @@ export const TRAY_EVENTS = {
   CHECK_FOR_UPDATES: 'tray:check-for-updates' // 托盘检查更新
 }
 
-// MCP会议专用事件
-export const MEETING_EVENTS = {
-  INSTRUCTION: 'mcp:meeting-instruction' // 主进程向渲染进程发送指令
-}
-
 // 悬浮按钮相关事件
 export const FLOATING_BUTTON_EVENTS = {
   CLICKED: 'floating-button:clicked', // 悬浮按钮被点击
@@ -224,6 +229,16 @@ export const FLOATING_BUTTON_EVENTS = {
   VISIBILITY_CHANGED: 'floating-button:visibility-changed', // 悬浮按钮显示状态改变
   POSITION_CHANGED: 'floating-button:position-changed', // 悬浮按钮位置改变
   ENABLED_CHANGED: 'floating-button:enabled-changed', // 悬浮按钮启用状态改变
+  HOVER_STATE_CHANGED: 'floating-button:hover-state-changed',
+  SNAPSHOT_REQUEST: 'floating-button:snapshot-request',
+  SNAPSHOT_UPDATED: 'floating-button:snapshot-updated',
+  LANGUAGE_REQUEST: 'floating-button:language-request',
+  LANGUAGE_CHANGED: 'floating-button:language-changed',
+  THEME_REQUEST: 'floating-button:theme-request',
+  THEME_CHANGED: 'floating-button:theme-changed',
+  TOGGLE_EXPANDED: 'floating-button:toggle-expanded',
+  SET_EXPANDED: 'floating-button:set-expanded',
+  OPEN_SESSION: 'floating-button:open-session',
   DRAG_START: 'floating-button:drag-start', // 悬浮按钮开始拖拽
   DRAG_MOVE: 'floating-button:drag-move', // 悬浮按钮拖拽移动
   DRAG_END: 'floating-button:drag-end' // 悬浮按钮结束拖拽
@@ -255,13 +270,15 @@ export const LIFECYCLE_EVENTS = {
 
 // Workspace events
 export const WORKSPACE_EVENTS = {
-  FILES_CHANGED: 'workspace:files-changed' // File tree changed
+  INVALIDATED: 'workspace:files-changed', // Workspace invalidation event
+  FILES_CHANGED: 'workspace:files-changed' // Legacy alias
 }
 
 // ACP-specific workspace events
 export const ACP_WORKSPACE_EVENTS = {
   SESSION_MODES_READY: 'acp-workspace:session-modes-ready', // Session modes available
-  SESSION_COMMANDS_READY: 'acp-workspace:session-commands-ready' // Session commands available
+  SESSION_COMMANDS_READY: 'acp-workspace:session-commands-ready', // Session commands available
+  SESSION_CONFIG_OPTIONS_READY: 'acp-workspace:session-config-options-ready' // Session config options available
 }
 
 export const ACP_DEBUG_EVENTS = {

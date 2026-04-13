@@ -7,9 +7,14 @@ import { ACP_WORKSPACE_EVENTS } from '@/events'
 import { usePresenter } from '@/composables/usePresenter'
 import { useMcpStore } from '@/stores/mcp'
 import { useSkillsStore } from '@/stores/skillsStore'
+import {
+  buildChatInputWorkspaceReferenceText,
+  resolveChatInputWorkspaceReferencePath
+} from '@/lib/chatInputWorkspaceReference'
 import SuggestionList from '../mentions/SuggestionList.vue'
 import {
   buildCommandText,
+  filterSlashSuggestionItems,
   flattenPromptResultToText,
   resolveSlashSelectionAction,
   sortSlashSuggestionItems,
@@ -80,7 +85,7 @@ const normalizeAcpCommands = (commands: unknown): AcpSessionCommand[] => {
 
 export function useChatInputMentions(options: UseChatInputMentionsOptions) {
   const workspacePresenter = usePresenter('workspacePresenter')
-  const newAgentPresenter = usePresenter('newAgentPresenter')
+  const agentSessionPresenter = usePresenter('agentSessionPresenter')
   const skillPresenter = usePresenter('skillPresenter')
   const mcpStore = useMcpStore()
   const skillsStore = useSkillsStore()
@@ -153,8 +158,11 @@ export function useChatInputMentions(options: UseChatInputMentionsOptions) {
         ([] as WorkspaceFileNode[])
 
       return result.slice(0, 20).map((file) => {
-        const relativePath = window.api.toRelativePath?.(file.path, workspacePath) ?? ''
-        const displayPath = relativePath || file.name
+        const displayPath = resolveChatInputWorkspaceReferencePath(
+          file.path,
+          workspacePath,
+          file.name
+        )
         return {
           id: `file:${file.path}`,
           category: 'file' as const,
@@ -162,7 +170,7 @@ export function useChatInputMentions(options: UseChatInputMentionsOptions) {
           description: file.path,
           payload: {
             path: file.path,
-            insertText: `@${displayPath} `
+            insertText: `${buildChatInputWorkspaceReferenceText(file.path, workspacePath, file.name)} `
           }
         }
       })
@@ -229,7 +237,7 @@ export function useChatInputMentions(options: UseChatInputMentionsOptions) {
     }
 
     try {
-      const commands = await newAgentPresenter.getAcpSessionCommands(sessionId)
+      const commands = await agentSessionPresenter.getAcpSessionCommands(sessionId)
       if (fetchSeq !== acpCommandFetchSeq.value) {
         return
       }
@@ -374,17 +382,7 @@ export function useChatInputMentions(options: UseChatInputMentionsOptions) {
   }
 
   const filterSlashItems = (query: string): SlashSuggestionItem[] => {
-    const normalized = query.trim().toLowerCase()
-    if (!normalized) {
-      return slashItems.value.slice(0, 20)
-    }
-
-    return slashItems.value
-      .filter((item) => {
-        if (item.label.toLowerCase().includes(normalized)) return true
-        return item.description?.toLowerCase().includes(normalized)
-      })
-      .slice(0, 20)
+    return filterSlashSuggestionItems(slashItems.value, query)
   }
 
   const createRenderer = () => {

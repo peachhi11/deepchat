@@ -28,12 +28,41 @@
     "agentWorkspaceTooltip": "دایرکتوری کاری عامل را تنظیم کنید",
     "attach": "پیوست",
     "voiceInput": "ورودی صوتی",
+    "queue": "افزودن به صف",
+    "stop": "توقف",
     "mcp": {
       "badge": "MCP {count}",
       "title": "MCPهای فعال",
       "empty": "سرویسی فعال نشده است",
       "openSettings": "باز کردن تنظیمات MCP"
+    },
+    "tools": {
+      "badge": "Tools",
+      "title": "Tools",
+      "mcpSection": "MCP",
+      "builtinSection": "ابزارهای داخلی",
+      "loading": "Loading tools...",
+      "builtinEmpty": "No built-in tools available",
+      "groups": {
+        "agentFilesystem": "Agent Filesystem",
+        "agentCore": "Agent Core",
+        "agentSkills": "Agent Skills",
+        "deepchatSettings": "DeepChat Settings",
+        "yobrowser": "YoBrowser"
+      }
     }
+  },
+  "pendingInput": {
+    "steer": "هدایت",
+    "queueCount": "در انتظار ارسال {count}/{max}",
+    "resumeQueue": "ادامه ارسال",
+    "toSteer": "تبدیل به هدایت",
+    "locked": "قفل‌شده",
+    "reorder": "تغییر ترتیب",
+    "files": "{count} فایل",
+    "attachmentsOnly": "{count} پیوست",
+    "empty": "پیام خالی",
+    "limitReached": "بخش انتظار پر است (حداکثر {max})."
   },
   "features": {
     "webSearch": "جستجوی وب",
@@ -54,6 +83,7 @@
   "messages": {
     "thinking": "در حال تفکر...",
     "rateLimitWaiting": "محدودیت نرخ درخواست، در صف انتظار...",
+    "rateLimitCompactLoading": "در محدودیت نرخ ({seconds}ث)",
     "rateLimitTitle": "محدودیت نرخ درخواست",
     "rateLimitQueue": "موقعیت صف",
     "rateLimitEstimated": "زمان تخمینی انتظار",
@@ -72,17 +102,6 @@
     "generationComplete": "ساخت تکمیل شد",
     "generationError": "ساخت ناموفق بود"
   },
-  "navigation": {
-    "title": "ناوبری پیام‌ها",
-    "searchPlaceholder": "جستجوی پیام‌ها...",
-    "noResults": "پیام منطبق پیدا نشد",
-    "noMessages": "هنوز پیامی وجود ندارد",
-    "totalMessages": "مجموع {count} پیام",
-    "searchResults": "{count} نتیجه از {total} پیام پیدا شد",
-    "userMessage": "پیام کاربر",
-    "assistantMessage": "پاسخ دستیار",
-    "unknownMessage": "پیام ناشناخته"
-  },
   "toolCall": {
     "title": "فراخوانی ابزار",
     "calling": "فراخوانی ابزار در حال انجام است",
@@ -92,13 +111,24 @@
     "clickToView": "برای مشاهده جزئیات کلیک کنید",
     "functionName": "نام تابع",
     "params": "پارامترها",
-    "responseData": "داده‌های پاسخ"
-  },
-  "mcpUi": {
-    "badge": "UI",
-    "collapse": "بستن",
-    "expand": "گسترش دهید",
-    "title": "MCP UI"
+    "responseData": "داده‌های پاسخ",
+    "subagents": {
+      "summary": "{mode} · {count} زیرایجنت",
+      "unnamedTask": "وظیفه بی‌نام",
+      "mode": {
+        "parallel": "موازی",
+        "chain": "زنجیره‌ای"
+      },
+      "status": {
+        "queued": "در صف",
+        "running": "در حال اجرا",
+        "completed": "تکمیل‌شده",
+        "error": "خطا",
+        "cancelled": "لغوشده",
+        "waiting_permission": "در انتظار مجوز",
+        "waiting_question": "در انتظار ورودی"
+      }
+    }
   },
   "mode": {
     "acpAgent": "نماینده ACP",
@@ -107,7 +137,8 @@
   },
   "topbar": {
     "share": "اشتراک‌گذاری",
-    "more": "بیشتر"
+    "more": "بیشتر",
+    "backToParent": "بازگشت به نشست والد"
   },
   "advancedSettings": {
     "button": "پیشرفته",
@@ -120,16 +151,28 @@
     "maxTokens": "حداکثر توکن",
     "thinkingBudget": "بودجه تفکر",
     "verbosity": "میزان جزئیات پاسخ",
+    "forceInterleavedThinkingCompat": "Interleaved Thinking",
+    "forceInterleavedThinkingCompatDescription": "کنترل می‌کند که این نشست پیام‌های reasoning و tool-call را با منطق Interleaved Thinking پردازش کند یا نه.",
     "verbosityPlaceholder": "سطح جزئیات را انتخاب کنید",
     "currentCustomPrompt": "سفارشی فعلی",
-    "useDefault": "استفاده از پیش‌فرض"
+    "useDefault": "استفاده از پیش‌فرض",
+    "decreaseValue": "کاهش {label}",
+    "increaseValue": "افزایش {label}",
+    "toggleValue": "روشن یا خاموش کردن {label}",
+    "validation": {
+      "finiteNumber": "باید یک عدد متناهی باشد",
+      "nonNegativeInteger": "باید یک عدد صحیح نامنفی باشد",
+      "contextLengthAtLeastMaxTokens": "باید بزرگ‌تر یا مساوی حداکثر توکن‌ها باشد",
+      "maxTokensWithinContextLength": "باید کوچک‌تر یا مساوی طول زمینه باشد"
+    }
   },
   "workspace": {
     "collapse": "بستن",
     "sections": {
       "files": "فایل‌ها",
       "git": "Git",
-      "artifacts": "Artifacts"
+      "artifacts": "Artifacts",
+      "subagents": "زیرایجنت‌ها"
     },
     "files": {
       "contextMenu": {
@@ -183,7 +226,19 @@
       },
       "noOutput": "بدون خروجی"
     },
-    "title": "فضای کار"
+    "title": "فضای کار",
+    "subagents": {
+      "empty": "هنوز هیچ نشست فرزندی وجود ندارد",
+      "self": "همین ایجنت",
+      "status": {
+        "working": "در حال اجرا",
+        "error": "خطا",
+        "idle": "بیکار"
+      }
+    }
+  },
+  "modelPicker": {
+    "empty": "هیچ مدلی پیدا نشد"
   },
   "audio": {
     "play": "پخش",
@@ -222,9 +277,60 @@
     "allAgents": "همه عامل‌ها",
     "expandSidebar": "گسترش نوار کناری",
     "collapseSidebar": "جمع کردن نوار کناری",
+    "remoteControlStatus": {
+      "disabled": "کنترل از راه دور غیرفعال است",
+      "stopped": "کنترل از راه دور متوقف شده است",
+      "starting": "کنترل از راه دور در حال راه‌اندازی است",
+      "running": "کنترل از راه دور در حال اجرا است",
+      "backoff": "کنترل از راه دور در حال تلاش مجدد است",
+      "error": "خطای کنترل از راه دور"
+    },
     "groupByDate": "گروه‌بندی بر اساس تاریخ",
     "groupByProject": "گروه‌بندی بر اساس پروژه",
+    "pinned": "سنجاق‌شده‌ها",
     "emptyTitle": "هنوز گفت‌وگویی وجود ندارد",
-    "emptyDescription": "برای شروع، یک گفت‌وگوی جدید آغاز کنید"
+    "emptyDescription": "برای شروع، یک گفت‌وگوی جدید آغاز کنید",
+    "remoteControlDisabled": "غیرفعال",
+    "searchPlaceholder": "جستجوی گفتگوها",
+    "searchAriaLabel": "جستجوی گفتگوها",
+    "searchEmptyTitle": "گفتگوی منطبقی پیدا نشد",
+    "searchEmptyDescription": "یک کلیدواژه دیگر برای عنوان امتحان کنید"
+  },
+  "floatingWidget": {
+    "title": "DeepChat",
+    "collapse": "جمع کردن نشست‌های شناور",
+    "empty": "هنوز هیچ نشست DeepChat وجود ندارد",
+    "executing": "فعال",
+    "sessionCount": "{count} نشست",
+    "untitled": "گفت‌وگوی جدید",
+    "status": {
+      "inProgress": "در حال انجام",
+      "done": "انجام شد",
+      "error": "خطا"
+    }
+  },
+  "subagents": {
+    "label": "زیرایجنت‌ها"
+  },
+  "spotlight": {
+    "placeholder": "جست‌وجوی گفتگوها، Agentها، تنظیمات و اقدامات…",
+    "searching": "در حال جست‌وجو…",
+    "emptyTitle": "نتیجهٔ مطابقی پیدا نشد",
+    "emptyDescription": "یک کلیدواژهٔ دیگر را امتحان کنید یا یک نشست اخیر را باز کنید.",
+    "hints": "↑↓ جابه‌جایی · Enter باز کردن · Esc بستن · Home/End پرش",
+    "kind": {
+      "session": "گفتگو",
+      "message": "پیام",
+      "agent": "Agent",
+      "setting": "تنظیمات",
+      "action": "اقدام"
+    }
+  },
+  "inlineSearch": {
+    "placeholder": "جستجو در گفتگو",
+    "ariaLabel": "جستجو در گفتگوی فعلی",
+    "previous": "نتیجه قبلی",
+    "next": "نتیجه بعدی",
+    "close": "بستن جستجو"
   }
 }

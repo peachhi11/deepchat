@@ -9,6 +9,18 @@
     "searchEngineSelect": "Select search engine",
     "searchPreview": "Search Preview",
     "autoScrollEnabled": "Auto-scroll while generating",
+    "autoCompaction": {
+      "title": "Auto Compaction",
+      "enabled": "Enable auto compaction",
+      "description": "When a conversation approaches the model context window limit, DeepChat can summarize older history automatically so the session keeps going. If disabled, overflowing history is dropped directly instead of summarized.",
+      "thresholdLabel": "Trigger threshold",
+      "thresholdMin": "Early ({value}%)",
+      "thresholdMax": "Late ({value}%)",
+      "thresholdDescription": "Start compaction when prompt usage reaches this share of the effective history budget. Lower values create more headroom; higher values preserve more raw context.",
+      "retainPairsLabel": "Retain recent message pairs",
+      "retainPairsValue": "{count} pair(s)",
+      "retainPairsDescription": "Keep the most recent completed user and assistant pairs outside compaction. The current query is not included."
+    },
     "searchAssistantModel": "Assistant Model",
     "selectModel": "Select Model",
     "proxyMode": "Proxy Mode",
@@ -61,12 +73,73 @@
     "fileMaxSizeHint": "Limits the maximum size of a single uploaded file",
     "defaultModel": {
       "title": "Default Model",
-      "chatModel": "Default Chat Model",
-      "visionModel": "Default Vision Model"
+      "chatModel": "Default Chat Model"
     }
   },
+  "deepchatAgents": {
+    "title": "DeepChat Agents",
+    "description": "Manage DeepChat agents and the defaults they seed into new sessions.",
+    "builtIn": "Built-in",
+    "editTitle": "Edit DeepChat Agent",
+    "createTitle": "Create DeepChat Agent",
+    "unnamed": "Unnamed Agent",
+    "name": "Name",
+    "namePlaceholder": "For example: Writer / Research / Translate",
+    "enabledLabel": "Enabled",
+    "descriptionLabel": "Description",
+    "descriptionPlaceholder": "Optional note about what this agent is for",
+    "avatarTitle": "Avatar",
+    "avatarDefault": "Default",
+    "avatarDefaultDesc": "DeepChat keeps the built-in icon. Other agents use a text avatar.",
+    "avatarLucide": "Lucide Icon",
+    "avatarLucideDesc": "Pick a Lucide icon and set light/dark colors.",
+    "avatarMonogram": "Monogram",
+    "avatarMonogramDesc": "Use two Latin letters or the first CJK character.",
+    "lucideIcon": "Lucide icon name",
+    "lightColor": "Light color",
+    "darkColor": "Dark color",
+    "monogramText": "Monogram",
+    "monogramPlaceholder": "For example: WR / 研",
+    "backgroundColor": "Background color",
+    "modelsTitle": "Model Defaults",
+    "chatModel": "Default Chat Model",
+    "assistantModel": "Assistant Model",
+    "visionModel": "Vision Model",
+    "temperature": "Temperature",
+    "contextLength": "Context Length",
+    "maxTokens": "Max Tokens",
+    "thinkingBudget": "Thinking Budget",
+    "reasoningEffort": "Reasoning Effort",
+    "verbosity": "Verbosity",
+    "interleaved": "Force interleaved thinking compat",
+    "systemPrompt": "Default system prompt",
+    "systemPromptPlaceholder": "Leave blank for an empty system prompt",
+    "defaultProjectPath": "Default directory (optional)",
+    "defaultProjectPathPlaceholder": "Leave empty to use the global default directory",
+    "permissionMode": "Default permission",
+    "permissionFullAccess": "Full access",
+    "permissionDefault": "Default permission",
+    "subagentsTitle": "Subagents",
+    "subagentsDescription": "Configure the reusable child-session slots exposed to subagent_orchestrator.",
+    "subagentsEnabled": "Enable subagents",
+    "subagentTargetType": "Target type",
+    "subagentTargetSelf": "Self",
+    "subagentTargetAgent": "Agent",
+    "subagentDisplayName": "Display name",
+    "subagentDescription": "Slot description",
+    "subagentTargetAgentLabel": "Target agent",
+    "subagentLimit": "{count}/{max} slots",
+    "addSubagentSlot": "+ Add Slot",
+    "toolsTitle": "Built-in Tools",
+    "compactionTitle": "Auto Compaction",
+    "compactionEnabled": "Enable auto compaction",
+    "compactionDescription": "These defaults only affect future DeepChat sessions.",
+    "compactionThreshold": "Trigger threshold",
+    "compactionRetainPairs": "Retain recent pairs",
+    "deleteConfirm": "Delete agent \"{name}\"? Its history will fall back to the built-in DeepChat agent."
+  },
   "notificationsHooks": {
-    "title": "Notifications & Hooks",
+    "title": "Hooks",
     "description": "Configure webhook notifications and lifecycle hooks.",
     "events": {
       "title": "Events",
@@ -160,6 +233,18 @@
       "backupSuccessTitle": "Backup successful",
       "backupSuccessMessage": "Data backed up successfully"
     },
+    "modelConfigUpdate": {
+      "title": "Update Model Config",
+      "description": "Force refresh provider.json from upstream to update model capabilities and default model settings.",
+      "button": "Update Now",
+      "updating": "Updating...",
+      "updatedTitle": "Model config updated",
+      "updatedDescription": "The latest provider metadata has been refreshed.",
+      "upToDateTitle": "Already up to date",
+      "upToDateDescription": "Your local model config is already using the latest provider metadata.",
+      "failedTitle": "Update failed",
+      "failedDescription": "Unable to refresh model config right now. Please try again later."
+    },
     "yoBrowser": {
       "clearButton": "Clear YoBrowser data",
       "clearFailedDescription": "Please try again or check the logs for more information.",
@@ -173,6 +258,109 @@
       "description": "An independent browser sandbox that does not share cookies and local storage with the main application. \nYoBrowser data can be cleared with one click here.",
       "title": "YoBrowser Sandbox"
     }
+  },
+  "dashboard": {
+    "badge": "Usage Dashboard",
+    "title": "Usage Dashboard",
+    "description": "Track token usage, cache hits, and estimated cost. Token and cost figures are estimated from public information, and some providers or earlier messages may be incomplete, so treat these figures as reference only.",
+    "actions": {
+      "refresh": "Refresh"
+    },
+    "backfill": {
+      "runningTitle": "Updating usage data",
+      "runningDescription": "Usage data is still being updated in the background. Current results are already available.",
+      "failedTitle": "Failed to update usage data",
+      "failedDescription": "Refresh this page or try again later."
+    },
+    "error": {
+      "title": "Failed to load dashboard",
+      "description": "Please try again later."
+    },
+    "empty": {
+      "title": "No usage stats yet",
+      "description": "Token usage, cache hits, and estimated cost will appear here once usage data is available.",
+      "historyNote": "Token and cost figures are estimated from public information. Some providers or earlier messages may be incomplete, so treat these figures as reference only."
+    },
+    "summary": {
+      "totalTokens": "Total tokens",
+      "totalTokensDescription": "Shows how input and output tokens contribute to the total.",
+      "inputTokensLabel": "Input",
+      "outputTokensLabel": "Output",
+      "cachedTokens": "Cached tokens",
+      "cachedTokensDescription": "Prompt tokens served from provider cache.",
+      "cachedTokensCachedLabel": "Cached",
+      "cachedTokensUncachedLabel": "Uncached",
+      "cacheHitRate": "Cache hit rate",
+      "cacheHitRateDescription": "Cached prompt tokens divided by total input tokens.",
+      "estimatedCost": "Estimated cost",
+      "estimatedCostDescription": "Estimated in USD using provider pricing or AIHubMix fallback pricing.",
+      "estimatedCostTrendLabel": "Trend over the last 30 days",
+      "estimatedCostTrendEmpty": "No cost recorded in the last 30 days.",
+      "recordingStartedAt": "Recording started",
+      "recordingStartedAtDescription": "The earliest usage record currently stored in this dashboard.",
+      "withDeepChatDaysLabel": "Days together",
+      "withDeepChatDaysValue": "{days} days",
+      "withDeepChatDaysSentence": "You are on day {days} with DeepChat.",
+      "withDeepChatDaysDescription": "Based on your earliest usage record from {date}.",
+      "withDeepChatDaysDescriptionUnavailable": "No usage record yet.",
+      "tokenUsage": "Token usage",
+      "nostalgiaLabel": "Echoes",
+      "nostalgiaDaysValue": "{days} days",
+      "nostalgiaSessionsValue": "{count} sessions",
+      "nostalgiaMessagesValue": "{count} messages",
+      "nostalgiaDaysDetailLabel": "Days together",
+      "nostalgiaDaysDetail": "You and DeepChat have spent {days} days together.",
+      "nostalgiaSessionsDetailLabel": "Sessions",
+      "nostalgiaSessionsDetail": "You have shared {count} sessions together.",
+      "nostalgiaMessagesDetailLabel": "Messages",
+      "nostalgiaMessagesDetail": "You have exchanged {count} messages.",
+      "nostalgiaMostActiveDayLabel": "Most active day",
+      "nostalgiaMostActiveDayDetail": "{date} was your most active day, with {count} messages."
+    },
+    "calendar": {
+      "title": "Contribution Calendar",
+      "description": "Daily token usage over the last 365 days.",
+      "legend": "Less to more",
+      "tooltip": "{date}: {tokens} tokens"
+    },
+    "breakdown": {
+      "providerTitle": "Top providers",
+      "providerDescription": "Ranked by estimated cost, then by total tokens.",
+      "modelTitle": "Top models",
+      "modelDescription": "Top 10 models by estimated cost, then by total tokens.",
+      "messages": "{count} messages",
+      "empty": "No breakdown data yet."
+    },
+    "rtk": {
+      "title": "RTK Savings",
+      "description": "Estimated tokens prevented from reaching the model context by RTK during DeepChat native command execution.",
+      "actions": {
+        "retry": "Retry check"
+      },
+      "status": {
+        "disabled": "Disabled",
+        "checking": "Checking",
+        "healthy": "Healthy",
+        "unhealthy": "Unavailable"
+      },
+      "descriptionDisabled": "RTK is turned off for this app session, so commands run through the normal execution path.",
+      "descriptionChecking": "DeepChat is verifying whether RTK can run correctly in the current environment.",
+      "descriptionHealthy": "RTK is active for DeepChat native command execution.",
+      "descriptionUnhealthy": "RTK failed its startup health check and has been disabled for this app session.",
+      "sourceLabel": "Runtime source: {source}",
+      "source": {
+        "bundled": "Bundled",
+        "system": "System",
+        "none": "Not available"
+      },
+      "summary": {
+        "savedTokens": "Saved tokens",
+        "commands": "Tracked commands",
+        "avgSavingsPct": "Average savings",
+        "outputTokens": "Filtered output"
+      }
+    },
+    "unavailable": "N/A"
   },
   "model": {
     "title": "Model Settings",
@@ -203,6 +391,11 @@
     "provider": "Service provider",
     "providerSetting": "Service provider settings",
     "selectModel": "Select a model",
+    "form": {
+      "id": {
+        "label": "Identifier"
+      }
+    },
     "modelConfig": {
       "cancel": "Cancel",
       "contextLength": {
@@ -238,6 +431,10 @@
       "reasoning": {
         "description": "Does the model support reasoning ability?",
         "label": "Reasoning ability"
+      },
+      "interleavedThinking": {
+        "label": "Interleaved Thinking",
+        "description": "Controls whether this model handles reasoning and tool-call messages with Interleaved Thinking. Provider defaults are applied automatically."
       },
       "thinkingBudget": {
         "label": "Thinking Budget",
@@ -317,6 +514,19 @@
           "chat": "Text Generation",
           "image": "Image Generation"
         }
+      },
+      "endpointType": {
+        "label": "Endpoint Type",
+        "description": "Select which upstream protocol New API should use for this model.",
+        "placeholder": "Select endpoint type",
+        "required": "Endpoint type is required",
+        "options": {
+          "openai": "OpenAI Chat",
+          "openai-response": "OpenAI Responses",
+          "anthropic": "Anthropic Messages",
+          "gemini": "Gemini Native",
+          "image-generation": "Image Generation"
+        }
       }
     }
   },
@@ -349,6 +559,9 @@
     "urlFormat": "API Example: {defaultUrl}",
     "urlFormatFill": "Fill into API URL",
     "openaiResponsesNotice": "OpenAI defaults to the Responses API. If a third-party endpoint only supports Chat Completions, use the OpenAI Completions provider.",
+    "modifyBaseUrl": "Modify",
+    "baseUrlLockedHint": "This provider is pinned to the recommended Base URL to reduce misconfiguration.",
+    "refreshModelsWithMetadataHint": "Refreshing this provider will sync upstream metadata first, then rebuild the local model list.",
     "modelList": "Model List",
     "enableModels": "Enable Models",
     "disableAllModels": "Disable All Models",
@@ -401,6 +614,20 @@
         "baseUrl": "API Base URL",
         "baseUrlPlaceholder": "Please enter the API base URL",
         "enable": "Enable Provider"
+      },
+      "providerDeeplinkImport": {
+        "title": "Import Provider",
+        "description": "Review the parsed provider configuration before applying it.",
+        "type": "Type",
+        "url": "URL",
+        "key": "Key",
+        "overwriteWarning": "This import will overwrite the current provider configuration.",
+        "confirming": "Importing..."
+      },
+      "baseUrlUnlock": {
+        "title": "Confirm Base URL Change",
+        "description": "Changing the Base URL for this provider is not recommended. An incorrect endpoint may cause request failures or other unexpected behavior. You can still continue if you understand the risk.",
+        "confirm": "Continue"
       },
       "deleteProvider": {
         "title": "Confirm Delete Provider",
@@ -476,7 +703,13 @@
       "backupSuccessTitle": "Backup completed",
       "backupSuccessMessage": "Backup saved at {time} ({size})",
       "importSuccessTitle": "Import completed",
-      "importSuccessMessage": "Successfully imported {count} conversations"
+      "importSuccessMessage": "Successfully imported {count} conversations",
+      "refreshModelsSuccessTitle": "Models refreshed",
+      "refreshModelsSuccessDescription": "The latest model list has been synced for this provider.",
+      "refreshModelsSuccessDescriptionWithMetadata": "Upstream metadata and the latest model list have been synced for this provider.",
+      "refreshModelsFailedTitle": "Refresh failed",
+      "refreshModelsFailedDescription": "Unable to refresh models for this provider right now. Please try again later.",
+      "refreshModelsFailedDescriptionWithMetadata": "Unable to refresh upstream metadata and models for this provider right now. Please try again later."
     },
     "modelscope": {
       "mcpSync": {
@@ -562,30 +795,8 @@
         "helper": "Nucleus sampling (0-1)."
       }
     },
-    "anthropicApiKeyTip": "Please go to Anthropic Console to get your API Key",
-    "anthropicConnected": "Anthropic connected",
-    "anthropicNotConnected": "Anthropic not connected",
-    "anthropicOAuthTip": "Click to authorize DeepChat to access your Anthropic account",
-    "oauthLogin": "OAuth Login",
-    "authMethod": "Authentication Method",
-    "authMethodPlaceholder": "Select authentication method",
     "apiKeyLabel": "API Key",
     "apiUrlLabel": "API URL",
-    "anthropicOAuthFlowTip": "The system will automatically open the authorization window. Please come back and enter the authorization code after authorization.",
-    "anthropicBrowserOpened": "External browser is open",
-    "anthropicCodeInstruction": "Please complete the authorization in an external browser and paste the obtained authorization code into the input box below",
-    "browserOpenedSuccess": "The external browser is open, please complete the authorization",
-    "codeRequired": "Please enter the authorization code",
-    "inputOAuthCode": "Enter the authorization code",
-    "codeExchangeFailed": "Authorization code exchange failed",
-    "invalidCode": "Invalid authorization code",
-    "oauthCodeHint": "Please paste the authorization code here after completing the authorization in an external browser",
-    "oauthCodePlaceholder": "Please enter the authorization code...",
-    "verifyConnection": "Verify Connection",
-    "manageModels": "Manage Models",
-    "anthropicOAuthActiveTip": "OAuth authentication is enabled, you can use Anthropic services directly",
-    "oauthVerifySuccess": "OAuth connection verified successfully",
-    "oauthVerifyFailed": "OAuth connection verification failed",
     "configurationSaved": "Configuration saved",
     "configurationUpdated": "Configuration updated",
     "dataRefreshed": "Data has been refreshed",
@@ -934,12 +1145,15 @@
     "goSettings": "Open Settings",
     "hideWindow": "Hide window",
     "quitApp": "Quit app",
+    "toggleSidebar": "Toggle Sidebar",
+    "toggleWorkspace": "Toggle Workspace",
     "zoomIn": "Zoom in ",
     "zoomOut": "Zoom out ",
     "zoomReset": "Reset zoom",
     "newWindow": "Open a new window",
     "showHideWindow": "Show/Hide window",
     "newConversation": "New conversation",
+    "quickSearch": "Spotlight search",
     "closeWindow": "Close the current window"
   },
   "acp": {
@@ -950,6 +1164,8 @@
     "useBuiltinRuntimeTitle": "Use DeepChat Built-in Runtime",
     "useBuiltinRuntimeDescription": "When enabled, bypasses system node and uv commands, using DeepChat's bundled versions.",
     "enableToAccess": "Enable ACP to configure agents.",
+    "registryInstallEntry": "Install Agent",
+    "registryInstallEntryDescription": "Search and install agents from the ACP Registry, then come back here to enable and configure them.",
     "addCustomAgent": "Add Custom Agent",
     "customEmpty": "No custom agents yet.",
     "customDeleteConfirm": "Delete custom agent \"{name}\"?",
@@ -967,6 +1183,28 @@
     "mcpAccessTitle": "Allowed MCP Servers",
     "mcpAccessEmpty": "There is currently no optional MCP.",
     "mcpAccessBadge": "MCP {count}",
+    "sharedMcpTitle": "Shared MCP",
+    "sharedMcpDescription": "All ACP agents share the same MCP access selection.",
+    "installedSectionTitle": "Installed Agents",
+    "installedSectionDescription": "Only installed registry agents appear here for enablement, inspection, and env overrides.",
+    "installedCount": "{count} installed",
+    "installedEmptyTitle": "No installed registry agents yet",
+    "installedEmptyDescription": "Install an agent from the ACP Registry first, then configure it here.",
+    "registryOverlayEmpty": "No agents match the current filters.",
+    "registryInstallAction": "Install",
+    "registryUninstallAction": "Uninstall",
+    "registryUninstallConfirm": "Uninstall \"{name}\"?",
+    "registryUninstallDescription": "DeepChat will disable this agent and clear locally managed install data when applicable. You can install it again later from the ACP Registry.",
+    "registryUninstallFailed": "Failed to uninstall agent",
+    "registryInstallTitle": "ACP Registry",
+    "registryInstallDescription": "Search, filter, and install ACP agents. Configure them back in settings after installation.",
+    "registryLearnMore": "Learn More",
+    "registryRepository": "Repository",
+    "installFilters": {
+      "all": "All",
+      "installed": "Installed",
+      "notInstalled": "Not Installed"
+    },
     "loading": "Loading ACP data...",
     "none": "None",
     "saveSuccess": "Configuration saved",
@@ -1078,7 +1316,29 @@
         "notification": "Notification",
         "permission": "Permission",
         "error": "Error"
-      }
+      },
+      "healthCheck": "Health Check",
+      "healthChecking": "Checking...",
+      "healthCheckFailed": "Health check failed"
+    },
+    "registryCount": "{count} agents",
+    "registryEmpty": "No registry agents are available for the current filters.",
+    "registryRefresh": "Refresh Registry",
+    "registryRepair": "Repair",
+    "registrySearchPlaceholder": "Search ACP Registry Agents...",
+    "filters": {
+      "all": "All statuses",
+      "enabled": "Enabled only",
+      "installed": "Installed only",
+      "attention": "Needs attention"
+    },
+    "envOverrideTitle": "Environment Variable Overrides",
+    "envOverridePlaceholder": "One KEY=VALUE per line",
+    "installState": {
+      "installed": "Installed",
+      "installing": "Installing",
+      "error": "Install failed",
+      "notInstalled": "Not installed"
     }
   },
   "rateLimit": {
@@ -1110,6 +1370,10 @@
   "skills": {
     "title": "Skills",
     "description": "Manage and configure AI assistant skills",
+    "draftSuggestions": {
+      "title": "Suggest Skill Drafts",
+      "description": "After a task is complete, allow the agent to suggest temporary reusable skill drafts. Drafts stay in a temp folder until you choose to import them manually."
+    },
     "openFolder": "Open Folder",
     "addSkill": "Add Skill",
     "empty": "No skills yet",
@@ -1144,6 +1408,12 @@
       "successMessage": "Skill {name} has been deleted successfully",
       "failed": "Deletion Failed"
     },
+    "card": {
+      "scripts": "{count} scripts",
+      "env": "{count} env",
+      "pythonShort": "Py",
+      "nodeShort": "Node"
+    },
     "edit": {
       "title": "Edit Skill",
       "placeholder": "Edit skill content here...",
@@ -1159,6 +1429,23 @@
       "allowedToolsPlaceholder": "Read, Grep, Bash",
       "allowedToolsHint": "Comma-separated list of tool names",
       "content": "Skill Content",
+      "runtimeTitle": "Runtime",
+      "runtimeHint": "Select how bundled scripts resolve Python and Node runtimes.",
+      "pythonRuntime": "Python Runtime",
+      "nodeRuntime": "Node Runtime",
+      "envTitle": "Environment Variables",
+      "envWarning": "Masked in the UI only. Values are stored as plain text in the skill sidecar file.",
+      "scriptsTitle": "Bundled Scripts",
+      "scriptsHint": "Only scripts under scripts/ can be run via skill_run.",
+      "noScripts": "No runnable scripts detected",
+      "scriptEnabled": "Enabled",
+      "scriptDescription": "Description Override",
+      "scriptDescriptionPlaceholder": "Optional description shown to the agent",
+      "runtime": {
+        "auto": "Auto fallback",
+        "system": "System runtime",
+        "builtin": "Built-in runtime"
+      },
       "files": "Folder Contents",
       "noFiles": "No files"
     },
@@ -1256,6 +1543,141 @@
       "dontShowAgain": "Don't show this again",
       "skip": "Skip",
       "importSelected": "Import Selected"
+    }
+  },
+  "environments": {
+    "title": "Environments",
+    "description": "Review project directories used by your sessions, open them quickly, or set one as the default for new chats.",
+    "default": {
+      "title": "Default Directory",
+      "description": "New chats preselect this directory unless you manually choose a different one.",
+      "empty": "No default directory is set."
+    },
+    "history": {
+      "title": "History",
+      "description": "Only directories that were actually used by sessions are listed here."
+    },
+    "temp": {
+      "title": "Temp Directories",
+      "description": "Directories under temp roots or app-managed workspaces are grouped here and hidden by default."
+    },
+    "actions": {
+      "refresh": "Refresh",
+      "showMissing": "Show Missing",
+      "open": "Open",
+      "setDefault": "Set Default",
+      "clearDefault": "Clear Default",
+      "showTemp": "Show Temp",
+      "hideTemp": "Hide Temp"
+    },
+    "badges": {
+      "default": "Default",
+      "temp": "Temp",
+      "missing": "Missing",
+      "notInHistory": "Not in History"
+    },
+    "meta": {
+      "sessions": "{count} sessions",
+      "lastUsed": "Last used: {value}",
+      "never": "Never"
+    },
+    "empty": {
+      "regular": "No environments to show.",
+      "temp": "No temp environments yet."
+    },
+    "errors": {
+      "openTitle": "Failed to Open Directory"
+    }
+  },
+  "remote": {
+    "title": "Remote",
+    "description": "Configure Telegram and Feishu remote control from one place.",
+    "telegram": {
+      "title": "Telegram",
+      "description": "Manage one Telegram bot for remote control and hook delivery.",
+      "botToken": "Bot Token",
+      "botTokenPlaceholder": "Telegram bot token"
+    },
+    "feishu": {
+      "title": "Feishu",
+      "description": "Connect a Feishu bot for direct messages, group chats, and topic threads.",
+      "appId": "App ID",
+      "appIdPlaceholder": "Feishu app ID",
+      "appSecret": "App Secret",
+      "appSecretPlaceholder": "Feishu app secret",
+      "verificationToken": "Verification Token",
+      "verificationTokenPlaceholder": "Feishu verification token",
+      "encryptKey": "Encrypt Key (optional)",
+      "encryptKeyPlaceholder": "Leave empty unless event encryption is enabled",
+      "botUser": "Bot user: {name} ({openId})",
+      "bindings": "Bindings: {count}, paired users: {pairedUserCount}",
+      "pairedUserOpenIds": "Paired User Open IDs",
+      "pairedUserOpenIdsPlaceholder": "e.g. ou_xxx, ou_yyy",
+      "accessRulesDescription": "Pair in a direct message first. In groups, only paired users who {'@'} mention the bot can drive a session.",
+      "accessRule1": "Pair in a direct message with /pair [code].",
+      "accessRule2": "In groups and topics, the bot only reacts when a paired user {'@'} mentions it."
+    },
+    "sections": {
+      "credentials": "Credentials",
+      "remoteControl": "Remote Control",
+      "notifications": "Notifications",
+      "accessRules": "Access Rules"
+    },
+    "remoteControl": {
+      "description": "Bind each remote endpoint to one session and keep the session available across commands.",
+      "allowedUserIds": "Allowed User IDs",
+      "allowedUserIdsPlaceholder": "e.g. 123456789, 987654321",
+      "defaultAgent": "Default Agent",
+      "defaultAgentPlaceholder": "Select an agent",
+      "defaultWorkdir": "Default Directory",
+      "defaultWorkdirPlaceholder": "Leave empty to use the global default directory",
+      "defaultWorkdirHelper": "Used when the default agent is ACP. Leave empty to fall back to the global default directory.",
+      "openPairDialog": "Pair",
+      "manageBindings": "Manage Bindings",
+      "pairCode": "Pair Code",
+      "noPairCode": "No active pair code",
+      "pairCodeExpiresAt": "Expires at {time}",
+      "pairDialogTitle": "{channel} Pairing",
+      "pairDialogDescription": "Generate a pairing code and finish pairing from your {channel} bot chat.",
+      "pairDialogInstructionTelegram": "Send this command to the Telegram bot:",
+      "pairDialogInstructionFeishu": "Send this command to the Feishu bot in a direct message:",
+      "bindingsDialogTitle": "{channel} Bindings",
+      "bindingsDialogDescription": "Remove remote endpoint bindings one by one.",
+      "bindingsEmpty": "No bindings yet.",
+      "pairingSuccessTitle": "Pairing complete",
+      "pairingSuccessDescription": "The paired principal list has been refreshed."
+    },
+    "hooks": {
+      "title": "Telegram Hooks",
+      "description": "Reuse the same Telegram bot for hook notifications.",
+      "chatId": "Chat ID",
+      "chatIdPlaceholder": "e.g. 123456789",
+      "threadId": "Thread ID (optional)",
+      "threadIdPlaceholder": "Optional thread ID"
+    },
+    "status": {
+      "title": "Runtime Status",
+      "botUser": "Bot user: {username} ({id})",
+      "bindings": "Bindings: {count}, poll offset: {pollOffset}",
+      "states": {
+        "disabled": "Disabled",
+        "stopped": "Stopped",
+        "starting": "Starting",
+        "running": "Running",
+        "backoff": "Retrying after failure",
+        "error": "Error"
+      }
+    },
+    "overview": {
+      "telegram": "{bindingCount} bindings, {pairedCount} paired users, hooks {hooks}",
+      "feishu": "{bindingCount} bindings, {pairedCount} paired users",
+      "hooksOn": "on",
+      "hooksOff": "off"
+    },
+    "bindingKinds": {
+      "dm": "DM",
+      "group": "Group",
+      "topic": "Topic"
     }
   }
 }

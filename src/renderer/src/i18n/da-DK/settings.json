@@ -61,8 +61,19 @@
     "fileMaxSizeHint": "Begrænser størrelsen på en enkelt uploadet fil",
     "defaultModel": {
       "title": "Standardmodel",
-      "chatModel": "Standard chatmodel",
-      "visionModel": "Standard visionsmodel"
+      "chatModel": "Standard chatmodel"
+    },
+    "autoCompaction": {
+      "title": "Automatisk komprimering",
+      "enabled": "Aktiver automatisk komprimering",
+      "description": "Når en samtale nærmer sig modellens kontekstvindues grænse, kan DeepChat automatisk komprimere ældre historik, så sessionen kan fortsætte. Hvis funktionen er slået fra, bliver historik, der overskrider budgettet, droppet direkte i stedet for komprimeret.",
+      "thresholdLabel": "Udløsningstærskel",
+      "thresholdMin": "Tidligt ({value}%)",
+      "thresholdMax": "Sent ({value}%)",
+      "thresholdDescription": "Start komprimering, når promptforbruget når denne andel af det effektive historikbudget. Lavere værdier giver mere luft; højere værdier bevarer mere rå kontekst.",
+      "retainPairsLabel": "Behold seneste beskedpar",
+      "retainPairsValue": "{count} par",
+      "retainPairsDescription": "Behold de senest fuldførte bruger-/assistent-par uden for komprimeringen. Den aktuelle forespørgsel er ikke inkluderet."
     }
   },
   "data": {
@@ -106,6 +117,18 @@
       "backupSuccessTitle": "Backup lykkedes",
       "backupSuccessMessage": "Data blev sikkerhedskopieret"
     },
+    "modelConfigUpdate": {
+      "title": "Opdater modelkonfiguration",
+      "description": "Tving en opdatering af provider.json fra upstream for at hente de nyeste modelkapaciteter og standardindstillinger.",
+      "button": "Opdater nu",
+      "updating": "Opdaterer...",
+      "updatedTitle": "Modelkonfiguration opdateret",
+      "updatedDescription": "De seneste providerdata er blevet hentet.",
+      "upToDateTitle": "Allerede opdateret",
+      "upToDateDescription": "Den lokale modelkonfiguration bruger allerede de nyeste providerdata.",
+      "failedTitle": "Opdatering mislykkedes",
+      "failedDescription": "Modelkonfigurationen kunne ikke opdateres lige nu. Prøv igen senere."
+    },
     "yoBrowser": {
       "clearButton": "Ryd YoBrowser-data",
       "clearFailedDescription": "Prøv venligst igen, eller tjek logfilerne for at få flere oplysninger.",
@@ -119,6 +142,109 @@
       "description": "En uafhængig browsersandbox, der ikke deler cookies og lokal lagring med hovedapplikationen. YoBrowser-data kan ryddes med et enkelt klik her.",
       "title": "YoBrowser Sandbox"
     }
+  },
+  "dashboard": {
+    "badge": "Brugsoverblik",
+    "title": "Brugsoverblik",
+    "description": "Vis tokenforbrug, cachetræf og estimerede omkostninger. Token- og omkostningsdata er estimeret ud fra offentligt tilgængelige oplysninger, og nogle udbydere eller ældre beskeder kan mangle data, så tallene er kun vejledende.",
+    "actions": {
+      "refresh": "Opdater"
+    },
+    "backfill": {
+      "runningTitle": "Opdaterer brugsdata",
+      "runningDescription": "Brugsdata opdateres stadig i baggrunden. De aktuelle resultater kan allerede ses.",
+      "failedTitle": "Kunne ikke opdatere brugsdata",
+      "failedDescription": "Opdater siden eller prøv igen senere."
+    },
+    "error": {
+      "title": "Kunne ikke indlæse oversigten",
+      "description": "Prøv igen senere."
+    },
+    "empty": {
+      "title": "Ingen brugsstatistik endnu",
+      "description": "Når der findes brugsdata, vises tokenforbrug, cachetræf og estimerede omkostninger her.",
+      "historyNote": "Token- og omkostningsdata er estimeret ud fra offentligt tilgængelige oplysninger. Nogle udbydere eller ældre beskeder kan mangle data, så tallene er kun vejledende."
+    },
+    "summary": {
+      "totalTokens": "Samlede tokens",
+      "totalTokensDescription": "Viser hvordan input- og outputtokens fordeler sig i det samlede forbrug.",
+      "inputTokensLabel": "Input",
+      "outputTokensLabel": "Output",
+      "cachedTokens": "Cachelagrede tokens",
+      "cachedTokensDescription": "Prompt-tokens leveret fra udbyderens cache.",
+      "cachedTokensCachedLabel": "Cachelagret",
+      "cachedTokensUncachedLabel": "Ikke cachelagret",
+      "cacheHitRate": "Cachetræfrate",
+      "cacheHitRateDescription": "Cachelagrede prompt-tokens divideret med alle inputtokens.",
+      "estimatedCost": "Estimeret pris",
+      "estimatedCostDescription": "Anslået pris i USD ud fra udbyderens priser eller AIHubMix som reserve.",
+      "estimatedCostTrendLabel": "Udvikling de seneste 30 dage",
+      "estimatedCostTrendEmpty": "Ingen registreret omkostning de seneste 30 dage.",
+      "recordingStartedAt": "Første registrering",
+      "recordingStartedAtDescription": "Den tidligste brugsregistrering, der aktuelt findes i denne oversigt.",
+      "withDeepChatDaysLabel": "Dage sammen",
+      "withDeepChatDaysValue": "{days} dage",
+      "withDeepChatDaysSentence": "Du er nu på dag {days} med DeepChat.",
+      "withDeepChatDaysDescription": "Baseret på din tidligste registrerede brug fra {date}.",
+      "withDeepChatDaysDescriptionUnavailable": "Der er endnu ingen brugsregistreringer.",
+      "tokenUsage": "Tokenforbrug",
+      "nostalgiaLabel": "Gamle minder",
+      "nostalgiaDaysValue": "{days} dage",
+      "nostalgiaSessionsValue": "{count} samtaler",
+      "nostalgiaMessagesValue": "{count} beskeder",
+      "nostalgiaDaysDetailLabel": "Tid sammen",
+      "nostalgiaDaysDetail": "Du og DeepChat har tilbragt {days} dage sammen.",
+      "nostalgiaSessionsDetailLabel": "Samtaler",
+      "nostalgiaSessionsDetail": "I har haft {count} samtaler sammen.",
+      "nostalgiaMessagesDetailLabel": "Beskeder",
+      "nostalgiaMessagesDetail": "I har udvekslet {count} beskeder.",
+      "nostalgiaMostActiveDayLabel": "Mest aktive dag",
+      "nostalgiaMostActiveDayDetail": "{date} var din mest aktive dag med {count} beskeder."
+    },
+    "calendar": {
+      "title": "Bidragskalender",
+      "description": "Dagligt tokenforbrug de seneste 365 dage.",
+      "legend": "Fra lav til høj",
+      "tooltip": "{date}: {tokens} tokens"
+    },
+    "breakdown": {
+      "providerTitle": "Udbyderrangliste",
+      "providerDescription": "Sorteret først efter estimeret pris og derefter efter samlede tokens.",
+      "modelTitle": "Modelrangliste",
+      "modelDescription": "Top 10 modeller efter estimeret pris og derefter samlede tokens.",
+      "messages": "{count} beskeder",
+      "empty": "Der er endnu ingen fordelingsdata."
+    },
+    "rtk": {
+      "title": "RTK-besparelser",
+      "description": "Estimerede tokens, som RTK forhindrede i at nå modelkonteksten under DeepChats indbyggede kommandokørsel.",
+      "actions": {
+        "retry": "Prøv igen"
+      },
+      "status": {
+        "disabled": "Deaktiveret",
+        "checking": "Kontrollerer",
+        "healthy": "Klar",
+        "unhealthy": "Utilgængelig"
+      },
+      "descriptionDisabled": "RTK er slået fra i denne appsession, så kommandoer kører via den normale eksekveringssti.",
+      "descriptionChecking": "DeepChat kontrollerer, om RTK kan køre korrekt i det aktuelle miljø.",
+      "descriptionHealthy": "RTK er aktiv for DeepChats indbyggede kommandokørsel.",
+      "descriptionUnhealthy": "RTK bestod ikke sin opstartskontrol og er blevet deaktiveret i denne appsession.",
+      "sourceLabel": "Runtime-kilde: {source}",
+      "source": {
+        "bundled": "Indbygget",
+        "system": "System",
+        "none": "Ikke tilgængelig"
+      },
+      "summary": {
+        "savedTokens": "Sparede tokens",
+        "commands": "Registrerede kommandoer",
+        "avgSavingsPct": "Gennemsnitlig besparelse",
+        "outputTokens": "Filtreret output"
+      }
+    },
+    "unavailable": "Ikke tilgængelig"
   },
   "model": {
     "title": "Modelindstillinger",
@@ -149,6 +275,11 @@
     "provider": "Tjenesteudbyder",
     "providerSetting": "Udbyderindstillinger",
     "selectModel": "Vælg en model",
+    "form": {
+      "id": {
+        "label": "Identifikator"
+      }
+    },
     "modelConfig": {
       "cancel": "Annuller",
       "contextLength": {
@@ -184,6 +315,10 @@
       "reasoning": {
         "description": "Understøtter modellen ræsonnering?",
         "label": "Ræsonnering"
+      },
+      "interleavedThinking": {
+        "label": "Interleaved Thinking",
+        "description": "Styrer, om denne model håndterer beskeder med ræsonnering og tool-calls med Interleaved Thinking. Leverandørens standarder anvendes automatisk."
       },
       "thinkingBudget": {
         "label": "Tænke-budget",
@@ -263,6 +398,19 @@
           "chat": "tekstgenerering",
           "image": "Billedgenerering"
         }
+      },
+      "endpointType": {
+        "label": "Endpunkttype",
+        "description": "Vælg hvilken upstream-protokol New API skal bruge til denne model.",
+        "placeholder": "Vælg endpunkttype",
+        "required": "Endpunkttype er påkrævet",
+        "options": {
+          "openai": "OpenAI Chat",
+          "openai-response": "OpenAI Responses",
+          "anthropic": "Anthropic Messages",
+          "gemini": "Gemini Native",
+          "image-generation": "Billedgenerering"
+        }
       }
     }
   },
@@ -283,6 +431,9 @@
     "urlFormat": "API-eksempel: {defaultUrl}",
     "urlFormatFill": "Udfyld API-URL",
     "openaiResponsesNotice": "OpenAI bruger som standard Responses API. Hvis et tredjeparts-endpoint kun understøtter Chat Completions, skal du bruge OpenAI Completions-udbyderen.",
+    "modifyBaseUrl": "Rediger",
+    "baseUrlLockedHint": "Denne udbyder er låst til den anbefalede basis-URL for at mindske fejlkonfiguration.",
+    "refreshModelsWithMetadataHint": "Opdatering af denne udbyder synkroniserer først upstream-metadata og genopbygger derefter den lokale modelliste.",
     "modelList": "Modelliste",
     "enableModels": "Aktivér modeller",
     "disableAllModels": "Deaktiver alle modeller",
@@ -368,6 +519,20 @@
         "baseUrlPlaceholder": "Indtast basis-URL'en for API'et",
         "enable": "Aktivér udbyder"
       },
+      "providerDeeplinkImport": {
+        "title": "Importer udbyder",
+        "description": "Gennemgå den fortolkede udbyderkonfiguration, før du anvender den.",
+        "type": "Type",
+        "url": "URL",
+        "key": "Nøgle",
+        "overwriteWarning": "Denne import vil overskrive den nuværende udbyderkonfiguration.",
+        "confirming": "Importerer..."
+      },
+      "baseUrlUnlock": {
+        "title": "Bekræft ændring af basis-URL",
+        "description": "Det anbefales ikke at ændre basis-URL'en for denne udbyder. Et forkert endpoint kan medføre fejl i forespørgsler eller anden uventet adfærd. Du kan stadig fortsætte, hvis du forstår risikoen.",
+        "confirm": "Fortsæt"
+      },
       "deleteProvider": {
         "title": "Bekræft sletning af udbyder",
         "content": "Er du sikker på, at du vil slette udbyderen \"{name}\"? Handlingen kan ikke fortrydes.",
@@ -442,7 +607,13 @@
       "backupSuccessTitle": "Backup fuldført",
       "backupSuccessMessage": "Backup gemt {time} ({size})",
       "importSuccessTitle": "Import fuldført",
-      "importSuccessMessage": "Importerede {count} samtaler"
+      "importSuccessMessage": "Importerede {count} samtaler",
+      "refreshModelsSuccessTitle": "Modeller opdateret",
+      "refreshModelsSuccessDescription": "Den nyeste modelliste er blevet synkroniseret for denne udbyder.",
+      "refreshModelsSuccessDescriptionWithMetadata": "Upstream-metadata og den nyeste modelliste er blevet synkroniseret for denne udbyder.",
+      "refreshModelsFailedTitle": "Opdatering mislykkedes",
+      "refreshModelsFailedDescription": "Modellerne for denne udbyder kunne ikke opdateres lige nu. Prøv igen senere.",
+      "refreshModelsFailedDescriptionWithMetadata": "Upstream-metadata og modeller for denne udbyder kunne ikke opdateres lige nu. Prøv igen senere."
     },
     "modelscope": {
       "mcpSync": {
@@ -496,30 +667,8 @@
       "verifyFailed": "Verifikation mislykkedes",
       "verifySuccess": "Verifikation gennemført"
     },
-    "anthropicApiKeyTip": "Gå til Anthropic Console for at hente din API-nøgle",
-    "anthropicConnected": "Anthropic tilsluttet",
-    "anthropicNotConnected": "Anthropic ikke tilsluttet",
-    "anthropicOAuthTip": "Klik for at give DeepChat adgang til din Anthropic-konto",
-    "oauthLogin": "OAuth-login",
-    "authMethod": "Godkendelsesmetode",
-    "authMethodPlaceholder": "Vælg godkendelsesmetode",
     "apiKeyLabel": "API-nøgle",
     "apiUrlLabel": "API-URL",
-    "anthropicOAuthFlowTip": "Systemet åbner automatisk autorisationsvinduet. Vend tilbage og indtast koden efter godkendelse.",
-    "anthropicBrowserOpened": "Ekstern browser er åbnet",
-    "anthropicCodeInstruction": "Færdiggør autorisationen i en ekstern browser og indsæt koden i feltet herunder",
-    "browserOpenedSuccess": "Den eksterne browser er åben – gennemfør autorisationen",
-    "codeRequired": "Indtast autorisationskoden",
-    "inputOAuthCode": "Indtast autorisationskode",
-    "codeExchangeFailed": "Udveksling af autorisationskode mislykkedes",
-    "invalidCode": "Ugyldig autorisationskode",
-    "oauthCodeHint": "Indsæt autorisationskoden her efter godkendelse i ekstern browser",
-    "oauthCodePlaceholder": "Indtast autorisationskoden...",
-    "verifyConnection": "Verificér forbindelse",
-    "manageModels": "Administrér modeller",
-    "anthropicOAuthActiveTip": "OAuth-godkendelse er aktiveret; du kan bruge Anthropic direkte",
-    "oauthVerifySuccess": "OAuth-forbindelse verificeret",
-    "oauthVerifyFailed": "OAuth-forbindelse kunne ikke verificeres",
     "configurationSaved": "Konfiguration gemt",
     "configurationUpdated": "Konfiguration opdateret",
     "dataRefreshed": "Data er opdateret",
@@ -880,12 +1029,15 @@
     "goSettings": "Åbn indstillinger",
     "hideWindow": "Skjul vindue",
     "quitApp": "Afslut app",
+    "toggleSidebar": "Vis/skjul sidepanel",
+    "toggleWorkspace": "Vis/skjul arbejdsområde",
     "zoomIn": "Zoom ind",
     "zoomOut": "Zoom ud",
     "zoomReset": "Nulstil zoom",
     "newWindow": "Åbn nyt vindue",
     "showHideWindow": "Vis/skjul vindue",
     "newConversation": "Ny samtale",
+    "quickSearch": "Spotlight-søgning",
     "closeWindow": "Luk aktiv fane"
   },
   "acp": {
@@ -1021,11 +1173,57 @@
       "send": "Send anmodning",
       "sending": "Sender...",
       "title": "ACP-fejlsøgning",
-      "workdirPlaceholder": "Lad tom for at bruge standard arbejdsmappe"
+      "workdirPlaceholder": "Lad tom for at bruge standard arbejdsmappe",
+      "healthCheck": "Health Check",
+      "healthChecking": "检查中...",
+      "healthCheckFailed": "健康检查失败"
     },
     "mcpAccessBadge": "MCP {count}",
     "mcpAccessEmpty": "Der er i øjeblikket ingen valgfri MCP.",
-    "mcpAccessTitle": "Tilgængelige MCP'er"
+    "mcpAccessTitle": "Tilgængelige MCP'er",
+    "registryCount": "{count} 个 Agent",
+    "registryEmpty": "当前筛选条件下没有可用的 Registry Agent。",
+    "registryRefresh": "刷新 Registry",
+    "registryRepair": "修复",
+    "registrySearchPlaceholder": "搜索 ACP Registry Agent...",
+    "filters": {
+      "all": "全部状态",
+      "enabled": "仅看已启用",
+      "installed": "仅看已安装",
+      "attention": "仅看待处理"
+    },
+    "envOverrideTitle": "环境变量覆盖",
+    "envOverridePlaceholder": "每行一个 KEY=VALUE",
+    "installState": {
+      "installed": "已安装",
+      "installing": "安装中",
+      "error": "安装失败",
+      "notInstalled": "未安装"
+    },
+    "registryInstallEntry": "Install Agent",
+    "registryInstallEntryDescription": "Search and install agents from the ACP Registry, then come back here to enable and configure them.",
+    "sharedMcpTitle": "Shared MCP",
+    "sharedMcpDescription": "All ACP agents share the same MCP access selection.",
+    "installedSectionTitle": "Installed Agents",
+    "installedSectionDescription": "Only installed registry agents appear here for enablement, inspection, and env overrides.",
+    "installedCount": "{count} installed",
+    "installedEmptyTitle": "No installed registry agents yet",
+    "installedEmptyDescription": "Install an agent from the ACP Registry first, then configure it here.",
+    "registryOverlayEmpty": "No agents match the current filters.",
+    "registryInstallAction": "Install",
+    "registryUninstallAction": "Afinstaller",
+    "registryUninstallConfirm": "Vil du afinstallere agenten \"{name}\"?",
+    "registryUninstallDescription": "DeepChat deaktiverer agenten og rydder lokalt administrerede installationsdata, når det er relevant. Du kan installere den igen senere fra ACP Registry.",
+    "registryUninstallFailed": "Kunne ikke afinstallere agenten",
+    "registryInstallTitle": "ACP Registry",
+    "registryInstallDescription": "Search, filter, and install ACP agents. Configure them back in settings after installation.",
+    "registryLearnMore": "Learn More",
+    "registryRepository": "Repository",
+    "installFilters": {
+      "all": "All",
+      "installed": "Installed",
+      "notInstalled": "Not Installed"
+    }
   },
   "rateLimit": {
     "title": "Rate limit",
@@ -1055,6 +1253,10 @@
   },
   "skills": {
     "addSkill": "Tilføj færdighed",
+    "draftSuggestions": {
+      "title": "Foreslå skill-kladder",
+      "description": "Når en opgave er færdig, kan agenten foreslå midlertidige og genanvendelige skill-kladder. Kladderne bliver i en midlertidig mappe, indtil du vælger at importere dem manuelt."
+    },
     "conflict": {
       "description": "Skillen \"{name}\" findes allerede. Vil du overskrive?",
       "overwrite": "dække",
@@ -1085,7 +1287,24 @@
       "placeholder": "Redigér skill-indhold her...",
       "readFailed": "Læsning fejlede",
       "success": "Gemmes succesfuldt",
-      "title": "Rediger færdighed"
+      "title": "Rediger færdighed",
+      "runtimeTitle": "Runtime",
+      "runtimeHint": "Select how bundled scripts resolve Python and Node runtimes.",
+      "pythonRuntime": "Python Runtime",
+      "nodeRuntime": "Node Runtime",
+      "envTitle": "Environment Variables",
+      "envWarning": "Masked in the UI only. Values are stored as plain text in the skill sidecar file.",
+      "scriptsTitle": "Bundled Scripts",
+      "scriptsHint": "Only scripts under scripts/ can be run via skill_run.",
+      "noScripts": "No runnable scripts detected",
+      "scriptEnabled": "Enabled",
+      "scriptDescription": "Description Override",
+      "scriptDescriptionPlaceholder": "Optional description shown to the agent",
+      "runtime": {
+        "auto": "Automatisk fallback",
+        "system": "System-runtime",
+        "builtin": "Indbygget runtime"
+      }
     },
     "empty": "Ingen færdigheder",
     "emptyHint": "Klik på knappen „Tilføj skill“ for at installere en ny skill",
@@ -1202,7 +1421,13 @@
       "syncing": "Importerer...",
       "title": "Eksterne værktøjer"
     },
-    "title": "Færdighedsstyring"
+    "title": "Færdighedsstyring",
+    "card": {
+      "scripts": "{count} scripts",
+      "env": "{count} env",
+      "pythonShort": "Py",
+      "nodeShort": "Node"
+    }
   },
   "notificationsHooks": {
     "commands": {
@@ -1256,6 +1481,212 @@
       "success": "succes",
       "testing": "Tester..."
     },
-    "title": "Notifikationer og Hooks"
+    "title": "Hooks"
+  },
+  "environments": {
+    "title": "Miljøer",
+    "description": "Se projektmapper, som dine sessioner har brugt, og åbn dem hurtigt eller sæt en som standard for nye chats.",
+    "default": {
+      "title": "Standardmappe",
+      "description": "Nye chats forvælger denne mappe, medmindre du manuelt vælger en anden.",
+      "empty": "Ingen standardmappe er angivet."
+    },
+    "history": {
+      "title": "Historik",
+      "description": "Kun mapper, der faktisk er brugt af sessioner, vises her."
+    },
+    "temp": {
+      "title": "Temp-mapper",
+      "description": "Mapper under midlertidige rødder eller app-administrerede arbejdsområder grupperes her og skjules som standard."
+    },
+    "actions": {
+      "refresh": "Opdater",
+      "showMissing": "Vis manglende mapper",
+      "open": "Åbn",
+      "setDefault": "Sæt som standard",
+      "clearDefault": "Ryd standard",
+      "showTemp": "Vis Temp",
+      "hideTemp": "Skjul Temp"
+    },
+    "badges": {
+      "default": "Standard",
+      "temp": "Temp",
+      "missing": "Mangler",
+      "notInHistory": "Ikke i historik"
+    },
+    "meta": {
+      "sessions": "{count} sessioner",
+      "lastUsed": "Sidst brugt: {value}",
+      "never": "Aldrig"
+    },
+    "empty": {
+      "regular": "Ingen miljøer at vise.",
+      "temp": "Ingen Temp-miljøer endnu."
+    },
+    "errors": {
+      "openTitle": "Kunne ikke åbne mappe"
+    }
+  },
+  "remote": {
+    "title": "Fjernstyring",
+    "description": "Konfigurer Telegram- og Feishu-fjernstyring ét sted.",
+    "telegram": {
+      "title": "Telegram",
+      "description": "Administrer én Telegram-bot til fjernstyring og hook-levering.",
+      "botToken": "Bot-token",
+      "botTokenPlaceholder": "Telegram bot-token"
+    },
+    "remoteControl": {
+      "title": "Fjernstyring",
+      "description": "Bind hvert fjernendepunkt til én DeepChat-session, og behold sessionen på tværs af kommandoer.",
+      "streamMode": "Stream-tilstand",
+      "streamModeDraft": "Udkast-streaming",
+      "streamModeFinal": "Kun endeligt svar",
+      "allowedUserIds": "Tilladte bruger-id'er",
+      "allowedUserIdsPlaceholder": "fx 123456789, 987654321",
+      "defaultAgent": "Standard DeepChat-agent",
+      "defaultAgentPlaceholder": "Vælg en agent",
+      "defaultWorkdir": "Standardmappe",
+      "defaultWorkdirPlaceholder": "Lad feltet være tomt for at bruge den globale standardmappe",
+      "defaultWorkdirHelper": "Bruges, når standardagenten er ACP. Lad feltet være tomt for at falde tilbage til den globale standardmappe.",
+      "openPairDialog": "Par",
+      "manageBindings": "Administrer bindinger",
+      "pairCode": "Parringskode",
+      "noPairCode": "Ingen aktiv parringskode",
+      "generatePairCode": "Generer",
+      "clearPairCode": "Ryd",
+      "pairCodeExpiresAt": "Udløber {time}",
+      "pairDialogTitle": "Telegram-parring",
+      "pairDialogDescription": "Generer en parringskode, og fuldfør parringen i din Telegram-botchat.",
+      "pairDialogInstruction": "Send denne kommando til den tilsvarende bot:",
+      "bindingsDialogTitle": "Bundne sessioner",
+      "bindingsDialogDescription": "Fjern Telegram-sessionbindinger én ad gangen.",
+      "bindingsEmpty": "Ingen Telegram-bindinger endnu.",
+      "pairingSuccessTitle": "Parring fuldført",
+      "pairingSuccessDescription": "Listen over tilladte bruger-id'er er blevet opdateret.",
+      "clearBindings": "Ryd bindinger",
+      "clearBindingsResult": "{count} binding(er) ryddet.",
+      "pairDialogInstructionTelegram": "Send denne kommando til Telegram-botten:",
+      "pairDialogInstructionFeishu": "Send denne kommando til Feishu-botten i en direkte besked:"
+    },
+    "hooks": {
+      "title": "Telegram-hooks",
+      "description": "Genbrug den samme Telegram-bot til hook-notifikationer.",
+      "chatId": "Chat-id",
+      "chatIdPlaceholder": "fx 123456789",
+      "threadId": "Tråd-id (valgfrit)",
+      "threadIdPlaceholder": "Valgfrit tråd-id"
+    },
+    "status": {
+      "title": "Kørselsstatus",
+      "botUser": "Bot-bruger: {username} ({id})",
+      "bindings": "Bindinger: {count}, poll-offset: {pollOffset}",
+      "states": {
+        "disabled": "Deaktiveret",
+        "stopped": "Stoppet",
+        "starting": "Starter",
+        "running": "Kører",
+        "backoff": "Prøver igen efter fejl",
+        "error": "Fejl"
+      }
+    },
+    "feishu": {
+      "title": "Feishu",
+      "description": "Tilslut en Feishu-bot til direkte beskeder, gruppechats og emnetråde.",
+      "appId": "App-id",
+      "appIdPlaceholder": "Feishu app-id",
+      "appSecret": "App-hemmelighed",
+      "appSecretPlaceholder": "Feishu app-hemmelighed",
+      "verificationToken": "Bekræftelsestoken",
+      "verificationTokenPlaceholder": "Feishu bekræftelsestoken",
+      "encryptKey": "Krypteringsnøgle (valgfri)",
+      "encryptKeyPlaceholder": "Lad feltet stå tomt, medmindre hændelseskryptering er slået til",
+      "botUser": "Bot-bruger: {name} ({openId})",
+      "bindings": "Bindinger: {count}, parrede brugere: {pairedUserCount}",
+      "pairedUserOpenIds": "Open ID'er for parrede brugere",
+      "pairedUserOpenIdsPlaceholder": "f.eks. ou_xxx, ou_yyy",
+      "accessRulesDescription": "Par først i en direkte besked. I grupper kan kun parrede brugere, der {'@'}-omtaler botten, styre en session.",
+      "accessRule1": "Par i en direkte besked med /pair [kode].",
+      "accessRule2": "I grupper og emner reagerer botten kun, når en parret bruger {'@'}-omtaler den."
+    },
+    "sections": {
+      "credentials": "Oplysninger",
+      "remoteControl": "Fjernstyring",
+      "notifications": "Notifikationer",
+      "accessRules": "Adgangsregler"
+    },
+    "overview": {
+      "telegram": "{bindingCount} bindinger, {pairedCount} parrede brugere, hooks {hooks}",
+      "feishu": "{bindingCount} bindinger, {pairedCount} parrede brugere",
+      "hooksOn": "til",
+      "hooksOff": "fra"
+    },
+    "bindingKinds": {
+      "dm": "Direkte besked",
+      "group": "Gruppe",
+      "topic": "Emne"
+    }
+  },
+  "deepchatAgents": {
+    "title": "DeepChat-agenter",
+    "description": "Administrer DeepChat-agenter og de standardværdier, de bruger i nye sessioner.",
+    "builtIn": "Indbygget",
+    "editTitle": "Rediger DeepChat-agent",
+    "createTitle": "Opret DeepChat-agent",
+    "unnamed": "Unavngiven agent",
+    "name": "Navn",
+    "namePlaceholder": "For eksempel: Skribent / Research / Oversæt",
+    "enabledLabel": "Aktiveret",
+    "descriptionLabel": "Beskrivelse",
+    "descriptionPlaceholder": "Valgfri note om, hvad denne agent bruges til",
+    "avatarTitle": "Avatar",
+    "avatarDefault": "Standard",
+    "avatarDefaultDesc": "DeepChat beholder det indbyggede ikon. Andre agenter bruger en tekstavatar.",
+    "avatarLucide": "Lucide-ikon",
+    "avatarLucideDesc": "Vælg et Lucide-ikon, og angiv farver til lys/mørk tilstand.",
+    "avatarMonogram": "Monogram",
+    "avatarMonogramDesc": "Brug to latinske bogstaver eller det første CJK-tegn.",
+    "lucideIcon": "Lucide-ikonnavn",
+    "lightColor": "Lys farve",
+    "darkColor": "Mørk farve",
+    "monogramText": "Monogram",
+    "monogramPlaceholder": "For eksempel: WR / 研",
+    "backgroundColor": "Baggrundsfarve",
+    "modelsTitle": "Modelstandarder",
+    "chatModel": "Standard chatmodel",
+    "assistantModel": "Assistentmodel",
+    "visionModel": "Vision-model",
+    "temperature": "Temperatur",
+    "contextLength": "Kontekstlængde",
+    "maxTokens": "Maks. tokens",
+    "thinkingBudget": "Tænkningsbudget",
+    "reasoningEffort": "Ræsonnementsniveau",
+    "verbosity": "Detaljegrad",
+    "interleaved": "Gennemtving kompatibilitet for interleaved thinking",
+    "systemPrompt": "Standard systemprompt",
+    "systemPromptPlaceholder": "Lad stå tomt for en tom systemprompt",
+    "defaultProjectPath": "Standardmappe (valgfri)",
+    "defaultProjectPathPlaceholder": "Lad stå tomt for at bruge den globale standardmappe",
+    "permissionMode": "Standardtilladelse",
+    "permissionFullAccess": "Fuld adgang",
+    "permissionDefault": "Standardtilladelse",
+    "toolsTitle": "Indbyggede værktøjer",
+    "compactionTitle": "Automatisk komprimering",
+    "compactionEnabled": "Aktivér automatisk komprimering",
+    "compactionDescription": "Disse standarder påvirker kun fremtidige DeepChat-sessioner.",
+    "compactionThreshold": "Udløsningstærskel",
+    "compactionRetainPairs": "Behold seneste par",
+    "deleteConfirm": "Slet agenten \"{name}\"? Dens historik falder tilbage til den indbyggede DeepChat-agent.",
+    "subagentsTitle": "Underagenter",
+    "subagentsDescription": "Konfigurer de genanvendelige slots til undersessioner, som `subagent_orchestrator` stiller til rådighed.",
+    "subagentsEnabled": "Aktivér underagenter",
+    "subagentTargetType": "Måltype",
+    "subagentTargetSelf": "Denne agent",
+    "subagentTargetAgent": "Agent",
+    "subagentDisplayName": "Visningsnavn",
+    "subagentDescription": "Slotbeskrivelse",
+    "subagentTargetAgentLabel": "Målagent",
+    "subagentLimit": "{count}/{max} pladser",
+    "addSubagentSlot": "+ Tilføj slot"
   }
 }

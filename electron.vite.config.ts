@@ -56,7 +56,9 @@ export default defineConfig({
       )
     },
     optimizeDeps: {
+      exclude: ['markstream-vue', 'stream-monaco'],
       include: [
+        '@antv/infographic',
         'monaco-editor',
         'axios'
       ]
@@ -64,7 +66,6 @@ export default defineConfig({
     resolve: {
       alias: {
         '@': resolve('src/renderer/src'),
-        '@browser': resolve('src/renderer/browser'),
         '@shared': resolve('src/shared'),
         "@shadcn": resolve('src/shadcn'),
         vue: 'vue/dist/vue.esm-bundler.js'
@@ -107,7 +108,6 @@ export default defineConfig({
       cssCodeSplit: false,
       rollupOptions: {
         input: {
-          browser: resolve('src/renderer/browser/index.html'),
           index: resolve('src/renderer/index.html'),
           floating: resolve('src/renderer/floating/index.html'),
           splash: resolve('src/renderer/splash/index.html'),

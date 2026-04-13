@@ -1,6 +1,6 @@
 import { AssistantMessageBlock, Message, UserMessageContent } from '@shared/chat'
 import { CONVERSATION } from '@shared/presenter'
-import { getNormalizedUserMessageText } from '../../agentPresenter/message/messageFormatter'
+import { getNormalizedUserMessageText } from '../../sessionPresenter/messageFormatter'
 import { NowledgeMemMessage, NowledgeMemThread } from '@shared/types/nowledgeMem'
 
 export function generateNowledgeMemExportFilename(
@@ -118,12 +118,6 @@ export function convertDeepChatToNowledgeMemFormat(
 
           case 'image':
             content += '[Image Content]\n'
-            break
-
-          case 'mcp_ui_resource':
-            if (block.mcp_ui_resource) {
-              content += `[MCP Resource] ${block.mcp_ui_resource.uri}\n`
-            }
             break
 
           case 'error':

@@ -5,7 +5,7 @@
 
 export type SidePanelTab = 'workspace' | 'browser'
 
-export type WorkspaceNavSection = 'artifacts' | 'files' | 'git'
+export type WorkspaceNavSection = 'artifacts' | 'files' | 'git' | 'subagents'
 
 export type WorkspaceViewMode = 'preview' | 'code'
 
@@ -25,7 +25,14 @@ export type WorkspaceFileNode = {
   expanded?: boolean
 }
 
-export type WorkspaceFilePreviewKind = 'text' | 'markdown' | 'html' | 'svg' | 'image' | 'binary'
+export type WorkspaceFilePreviewKind =
+  | 'text'
+  | 'markdown'
+  | 'html'
+  | 'pdf'
+  | 'svg'
+  | 'image'
+  | 'binary'
 
 export type WorkspaceFileMetadata = {
   fileName: string
@@ -42,6 +49,7 @@ export type WorkspaceFilePreview = {
   mimeType: string
   kind: WorkspaceFilePreviewKind
   content: string
+  previewUrl?: string
   thumbnail?: string
   language?: string | null
   metadata: WorkspaceFileMetadata
@@ -82,6 +90,29 @@ export type WorkspaceGitDiff = {
   unstaged: string
 }
 
+export type WorkspaceInvalidationKind = 'fs' | 'git' | 'full'
+
+export type WorkspaceInvalidationSource = 'watcher' | 'fallback' | 'lifecycle'
+
+export type WorkspaceInvalidationEvent = {
+  workspacePath: string
+  kind: WorkspaceInvalidationKind
+  source: WorkspaceInvalidationSource
+}
+
+export type ResolveMarkdownLinkedFileInput = {
+  workspacePath: string | null
+  href: string
+  sourceFilePath?: string | null
+}
+
+export type WorkspaceLinkedFileResolution = {
+  path: string
+  name: string
+  relativePath: string
+  workspaceRoot: string | null
+}
+
 /**
  * Workspace Presenter interface
  */
@@ -109,6 +140,18 @@ export interface IWorkspacePresenter {
    * @param workdir Workspace directory path
    */
   unregisterWorkdir(workdir: string): Promise<void>
+
+  /**
+   * Start watching a workspace for file-system and git invalidation events.
+   * @param workspacePath Workspace directory path
+   */
+  watchWorkspace(workspacePath: string): Promise<void>
+
+  /**
+   * Stop watching a workspace.
+   * @param workspacePath Workspace directory path
+   */
+  unwatchWorkspace(workspacePath: string): Promise<void>
 
   /**
    * Read directory (shallow, only first level)
@@ -142,6 +185,14 @@ export interface IWorkspacePresenter {
    * @param filePath Absolute file path
    */
   readFilePreview(filePath: string): Promise<WorkspaceFilePreview | null>
+
+  /**
+   * Resolve a markdown file link against the current workspace or source file.
+   * Authorizes the resolved file for subsequent preview/open operations.
+   */
+  resolveMarkdownLinkedFile(
+    input: ResolveMarkdownLinkedFileInput
+  ): Promise<WorkspaceLinkedFileResolution | null>
 
   /**
    * Read git status for the provided workspace path.

@@ -12,7 +12,7 @@ function createDeferred<T>() {
 const setupStore = async () => {
   vi.resetModules()
 
-  const newAgentPresenter = {
+  const agentSessionPresenter = {
     getMessages: vi.fn().mockResolvedValue([]),
     getMessage: vi.fn().mockResolvedValue(null)
   }
@@ -25,7 +25,7 @@ const setupStore = async () => {
   }))
 
   vi.doMock('@/composables/usePresenter', () => ({
-    usePresenter: () => newAgentPresenter
+    usePresenter: () => agentSessionPresenter
   }))
 
   vi.doMock('@/stores/ui/session', () => ({
@@ -40,13 +40,13 @@ const setupStore = async () => {
 
   const { useMessageStore } = await import('@/stores/ui/message')
   const store = useMessageStore()
-  return { store, newAgentPresenter }
+  return { store, agentSessionPresenter }
 }
 
 describe('messageStore', () => {
   it('loadMessages only hydrates persisted messages', async () => {
-    const { store, newAgentPresenter } = await setupStore()
-    newAgentPresenter.getMessages.mockResolvedValueOnce([
+    const { store, agentSessionPresenter } = await setupStore()
+    agentSessionPresenter.getMessages.mockResolvedValueOnce([
       {
         id: 'm1',
         sessionId: 's1',
@@ -64,17 +64,17 @@ describe('messageStore', () => {
 
     await store.loadMessages('s1')
 
-    expect(newAgentPresenter.getMessages).toHaveBeenCalledWith('s1')
+    expect(agentSessionPresenter.getMessages).toHaveBeenCalledWith('s1')
     expect(store.messages.value).toHaveLength(1)
     expect(store.messages.value[0]?.metadata).toContain('"messageType":"compaction"')
   })
 
   it('ignores stale loadMessages results', async () => {
-    const { store, newAgentPresenter } = await setupStore()
+    const { store, agentSessionPresenter } = await setupStore()
     const firstLoad = createDeferred<any[]>()
     const secondLoad = createDeferred<any[]>()
 
-    newAgentPresenter.getMessages
+    agentSessionPresenter.getMessages
       .mockReturnValueOnce(firstLoad.promise)
       .mockReturnValueOnce(secondLoad.promise)
 
@@ -117,5 +117,56 @@ describe('messageStore', () => {
 
     expect(store.messages.value).toHaveLength(1)
     expect(store.messages.value[0]?.id).toBe('m2')
+  })
+
+  it('keeps rate-limit stream messages ephemeral and skips message hydration', async () => {
+    const { store, agentSessionPresenter } = await setupStore()
+    const responseHandler = (
+      (window as any).electron.ipcRenderer.on as ReturnType<typeof vi.fn>
+    ).mock.calls.find(([eventName]) => eventName === 'stream:response')?.[1]
+
+    expect(typeof responseHandler).toBe('function')
+
+    responseHandler(
+      {},
+      {
+        conversationId: 's1',
+        messageId: '__rate_limit__:s1:1',
+        blocks: [
+          {
+            type: 'action',
+            action_type: 'rate_limit',
+            status: 'pending',
+            timestamp: 1,
+            extra: {
+              providerId: 'openai',
+              qpsLimit: 1,
+              currentQps: 1,
+              queueLength: 2,
+              estimatedWaitTime: 4000
+            }
+          }
+        ]
+      }
+    )
+
+    expect(store.isStreaming.value).toBe(true)
+    expect(store.currentStreamMessageId.value).toBe('__rate_limit__:s1:1')
+    expect(store.streamingBlocks.value).toHaveLength(1)
+    expect(store.messages.value).toHaveLength(0)
+    expect(agentSessionPresenter.getMessage).not.toHaveBeenCalled()
+
+    responseHandler(
+      {},
+      {
+        conversationId: 's1',
+        messageId: '__rate_limit__:s1:1',
+        blocks: []
+      }
+    )
+
+    expect(store.streamingBlocks.value).toEqual([])
+    expect(store.messages.value).toHaveLength(0)
+    expect(agentSessionPresenter.getMessage).not.toHaveBeenCalled()
   })
 })

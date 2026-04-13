@@ -58,7 +58,7 @@
           :files="attachedFiles"
           :session-id="acpDraftSessionId"
           :workspace-path="projectStore.selectedProject?.path ?? null"
-          :is-acp-session="(agentStore.selectedAgentId ?? 'deepchat') !== 'deepchat'"
+          :is-acp-session="isAcpSelectedAgent"
           :submit-disabled="isAcpWorkdirMissing"
           @update:files="onFilesChange"
           @pending-skills-change="onPendingSkillsChange"
@@ -75,14 +75,14 @@
         </ChatInputBox>
 
         <!-- Status bar -->
-        <ChatStatusBar />
+        <ChatStatusBar :acp-draft-session-id="acpDraftSessionId" />
       </div>
     </div>
   </TooltipProvider>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { TooltipProvider } from '@shadcn/components/ui/tooltip'
 import { Button } from '@shadcn/components/ui/button'
@@ -102,10 +102,15 @@ import { useProjectStore } from '@/stores/ui/project'
 import { useSessionStore } from '@/stores/ui/session'
 import { useAgentStore } from '@/stores/ui/agent'
 import { useModelStore } from '@/stores/modelStore'
-import { useDraftStore } from '@/stores/ui/draft'
+import { useDraftStore, type StartDeeplinkPayload } from '@/stores/ui/draft'
 import { usePresenter } from '@/composables/usePresenter'
-import type { MessageFile as ChatMessageFile } from '@shared/chat'
-import type { MessageFile as AgentMessageFile } from '@shared/types/agent-interface'
+import type {
+  DeepChatAgentConfig,
+  MessageFile,
+  SessionGenerationSettings
+} from '@shared/types/agent-interface'
+import { normalizeDeepChatSubagentConfig } from '@shared/lib/deepchatSubagents'
+import { isChatSelectableModelType, type ModelType } from '@shared/model'
 
 const projectStore = useProjectStore()
 const sessionStore = useSessionStore()
@@ -113,11 +118,11 @@ const agentStore = useAgentStore()
 const modelStore = useModelStore()
 const draftStore = useDraftStore()
 const configPresenter = usePresenter('configPresenter')
-const newAgentPresenter = usePresenter('newAgentPresenter')
+const agentSessionPresenter = usePresenter('agentSessionPresenter')
 const { t } = useI18n()
 
 const message = ref('')
-const attachedFiles = ref<ChatMessageFile[]>([])
+const attachedFiles = ref<MessageFile[]>([])
 const pendingSkills = ref<string[]>([])
 const chatInputRef = ref<{
   triggerAttach: () => void
@@ -126,16 +131,54 @@ const chatInputRef = ref<{
 const acpDraftSessionId = ref<string | null>(null)
 const lastAcpDraftKey = ref<string | null>(null)
 const acpDraftRequestSeq = ref(0)
+let currentDraftDefaultsTask: Promise<void> | null = null
+const availableAgents = computed(() => (Array.isArray(agentStore.agents) ? agentStore.agents : []))
+const resolveAgentType = (agentId: string | null | undefined): 'deepchat' | 'acp' => {
+  if (!agentId) {
+    return 'deepchat'
+  }
+
+  const matchedAgent = availableAgents.value.find((agent) => agent.id === agentId)
+  const selectedAgent =
+    agentStore.selectedAgent && agentStore.selectedAgent.id === agentId
+      ? agentStore.selectedAgent
+      : null
+  const explicitType = matchedAgent?.agentType ?? matchedAgent?.type ?? selectedAgent?.type
+  if (explicitType === 'deepchat' || explicitType === 'acp') {
+    return explicitType
+  }
+
+  return agentId === 'deepchat' ? 'deepchat' : 'acp'
+}
+const selectedAgent = computed(() => {
+  const selectedAgentId = agentStore.selectedAgentId ?? 'deepchat'
+  const matchedAgent = availableAgents.value.find((agent) => agent.id === selectedAgentId)
+  if (matchedAgent) {
+    return matchedAgent
+  }
+
+  if (agentStore.selectedAgent && agentStore.selectedAgent.id === selectedAgentId) {
+    return agentStore.selectedAgent
+  }
+
+  return { id: selectedAgentId, type: resolveAgentType(selectedAgentId) }
+})
+const isAcpSelectedAgent = computed(() => selectedAgent.value.type === 'acp')
+const normalizeProjectPath = (value: string | null | undefined) => {
+  const normalized = value?.trim()
+  return normalized ? normalized : null
+}
 const selectedProjectName = computed(
   () => projectStore.selectedProject?.name ?? t('common.project.select')
 )
 const isAcpWorkdirMissing = computed(() => {
-  const selectedAgentId = agentStore.selectedAgentId ?? 'deepchat'
-  if (selectedAgentId === 'deepchat') {
+  if (!isAcpSelectedAgent.value) {
     return false
   }
   return !projectStore.selectedProject?.path?.trim()
 })
+
+const isChatSelectableModel = (model: { type?: ModelType }) => isChatSelectableModelType(model.type)
 
 const getEnabledModel = (
   providerId?: string,
@@ -143,7 +186,9 @@ const getEnabledModel = (
 ): { providerId: string; modelId: string } | null => {
   if (!providerId || !modelId) return null
   const matched = modelStore.enabledModels.some(
-    (group) => group.providerId === providerId && group.models.some((model) => model.id === modelId)
+    (group) =>
+      group.providerId === providerId &&
+      group.models.some((model) => model.id === modelId && isChatSelectableModel(model))
   )
   return matched ? { providerId, modelId } : null
 }
@@ -155,26 +200,94 @@ async function resolveModel(): Promise<{ providerId: string; modelId: string } |
     return draftModel
   }
 
-  // 1. defaultModel from settings
+  // 1. preferredModel (last user selection)
+  const preferredModel = (await configPresenter.getSetting('preferredModel')) as
+    | { providerId: string; modelId: string }
+    | undefined
+  const resolvedPreferredModel = getEnabledModel(
+    preferredModel?.providerId,
+    preferredModel?.modelId
+  )
+  if (resolvedPreferredModel) {
+    return resolvedPreferredModel
+  }
+
+  // 2. defaultModel from settings
   const defaultModel = (await configPresenter.getSetting('defaultModel')) as
     | { providerId: string; modelId: string }
     | undefined
-  if (defaultModel?.providerId && defaultModel?.modelId) return defaultModel
-
-  // 2. preferredModel (last user selection)
-  const preferred = (await configPresenter.getSetting('preferredModel')) as
-    | { providerId: string; modelId: string }
-    | undefined
-  if (preferred?.providerId && preferred?.modelId) return preferred
+  const resolvedDefaultModel = getEnabledModel(defaultModel?.providerId, defaultModel?.modelId)
+  if (resolvedDefaultModel) {
+    return resolvedDefaultModel
+  }
 
   // 3. First available enabled model
   for (const group of modelStore.enabledModels) {
-    if (group.models.length > 0) {
-      return { providerId: group.providerId, modelId: group.models[0].id }
+    const firstChatSelectableModel = group.models.find(isChatSelectableModel)
+    if (firstChatSelectableModel) {
+      return { providerId: group.providerId, modelId: firstChatSelectableModel.id }
     }
   }
 
   return null
+}
+
+const normalizeStartMention = (mention: string): string => {
+  const normalized = mention.trim().replace(/^@+/, '')
+  return normalized ? `@${normalized}` : ''
+}
+
+const buildStartMessage = (payload: StartDeeplinkPayload): string => {
+  const mentionText = payload.mentions.map(normalizeStartMention).filter(Boolean).join(' ')
+  return [payload.msg.trim(), mentionText].filter(Boolean).join(' ')
+}
+
+const resolveStartModelSelection = (
+  requestedModelId: string | null
+): { providerId: string; modelId: string } | null => {
+  const normalizedModelId = requestedModelId?.trim().toLowerCase()
+  if (!normalizedModelId) {
+    return null
+  }
+
+  for (const group of modelStore.enabledModels) {
+    const matched = group.models.find(
+      (model) => model.id.toLowerCase() === normalizedModelId && isChatSelectableModel(model)
+    )
+    if (matched) {
+      return { providerId: group.providerId, modelId: matched.id }
+    }
+  }
+
+  for (const group of modelStore.enabledModels) {
+    const matched = group.models.find(
+      (model) => model.id.toLowerCase().includes(normalizedModelId) && isChatSelectableModel(model)
+    )
+    if (matched) {
+      return { providerId: group.providerId, modelId: matched.id }
+    }
+  }
+
+  return null
+}
+
+const applyStartDeeplink = async (payload: StartDeeplinkPayload) => {
+  const draftDefaultsTask = currentDraftDefaultsTask
+  if (draftDefaultsTask) {
+    await draftDefaultsTask
+  }
+
+  await nextTick()
+  message.value = buildStartMessage(payload)
+  draftStore.systemPrompt = payload.systemPrompt
+
+  const matchedModel = resolveStartModelSelection(payload.modelId)
+  if (matchedModel) {
+    draftStore.providerId = matchedModel.providerId
+    draftStore.modelId = matchedModel.modelId
+  }
+
+  draftStore.clearPendingStartDeeplink()
 }
 
 async function onSubmit() {
@@ -198,34 +311,20 @@ async function onCommandSubmit(command: string) {
   await submitText(text, files)
 }
 
-const toAgentMessageFiles = (files: ChatMessageFile[]): AgentMessageFile[] =>
-  files.map((file) => ({
-    ...file,
-    metadata: file.metadata
-      ? {
-          ...file.metadata,
-          fileCreated: file.metadata.fileCreated
-            ? new Date(file.metadata.fileCreated as Date | string | number)
-            : undefined,
-          fileModified: file.metadata.fileModified
-            ? new Date(file.metadata.fileModified as Date | string | number)
-            : undefined
-        }
-      : undefined
-  }))
-
-async function submitText(text: string, files: ChatMessageFile[]) {
+async function submitText(text: string, files: MessageFile[]) {
   if (!text.trim()) return
 
-  const agentId = agentStore.selectedAgentId ?? 'deepchat'
-  const isAcp = agentId !== 'deepchat'
-  const normalizedFiles = toAgentMessageFiles(files)
-
+  const agentId = selectedAgent.value.id
+  const isAcp = isAcpSelectedAgent.value
+  const draftPermissionMode = draftStore.permissionMode
+  const draftDisabledAgentTools = [...draftStore.disabledAgentTools]
+  const draftSubagentEnabled = draftStore.subagentEnabled
+  const draftGenerationSettings = draftStore.toGenerationSettings()
   if (isAcp && acpDraftSessionId.value) {
     await sessionStore.selectSession(acpDraftSessionId.value)
     await sessionStore.sendMessage(acpDraftSessionId.value, {
       text,
-      files: normalizedFiles
+      files
     })
     return
   }
@@ -252,22 +351,101 @@ async function submitText(text: string, files: ChatMessageFile[]) {
 
   await sessionStore.createSession({
     message: text,
-    files: normalizedFiles,
+    files,
     projectDir: projectStore.selectedProject?.path,
     agentId,
     providerId,
     modelId,
-    permissionMode: draftStore.permissionMode,
-    generationSettings: draftStore.toGenerationSettings(),
+    permissionMode: draftPermissionMode,
+    disabledAgentTools: isAcp ? undefined : draftDisabledAgentTools,
+    subagentEnabled: isAcp ? false : draftSubagentEnabled,
+    generationSettings: draftGenerationSettings,
     activeSkills: dedupedPendingSkills.length > 0 ? dedupedPendingSkills : undefined
   })
+}
+
+const buildDraftGenerationSettings = (
+  config: DeepChatAgentConfig
+): Partial<SessionGenerationSettings> => {
+  return {
+    systemPrompt: config.systemPrompt ?? ''
+  }
+}
+
+const resolveDeepChatAgentConfig = async (agentId: string): Promise<DeepChatAgentConfig> => {
+  if (typeof configPresenter.resolveDeepChatAgentConfig === 'function') {
+    return configPresenter.resolveDeepChatAgentConfig(agentId)
+  }
+
+  const systemPrompt = await configPresenter.getSetting?.('default_system_prompt')
+
+  return normalizeDeepChatSubagentConfig({
+    defaultModelPreset: undefined,
+    systemPrompt: typeof systemPrompt === 'string' ? systemPrompt : '',
+    permissionMode: 'full_access',
+    disabledAgentTools: []
+  })
+}
+
+const applyDraftDefaultsForSelectedAgent = async (): Promise<void> => {
+  const agentId = selectedAgent.value.id
+  const globalDefaultProjectPath = normalizeProjectPath(projectStore.defaultProjectPath)
+  const currentProjectPath = normalizeProjectPath(projectStore.selectedProject?.path)
+  draftStore.agentId = agentId
+  draftStore.providerId = undefined
+  draftStore.modelId = undefined
+  draftStore.permissionMode = 'full_access'
+  draftStore.disabledAgentTools = []
+  draftStore.subagentEnabled = false
+  draftStore.systemPrompt = undefined
+  draftStore.temperature = undefined
+  draftStore.contextLength = undefined
+  draftStore.maxTokens = undefined
+  draftStore.thinkingBudget = undefined
+  draftStore.reasoningEffort = undefined
+  draftStore.verbosity = undefined
+  draftStore.forceInterleavedThinkingCompat = undefined
+
+  if (selectedAgent.value.type === 'acp') {
+    const resolvedProjectPath = currentProjectPath ?? globalDefaultProjectPath
+    if (!currentProjectPath && globalDefaultProjectPath) {
+      projectStore.selectProject(globalDefaultProjectPath, 'default')
+    }
+    draftStore.projectDir = resolvedProjectPath ?? undefined
+    draftStore.providerId = 'acp'
+    draftStore.modelId = agentId
+    draftStore.permissionMode = 'full_access'
+    draftStore.disabledAgentTools = []
+    draftStore.subagentEnabled = false
+    return
+  }
+
+  const config = await resolveDeepChatAgentConfig(agentId)
+  const agentDefaultProjectPath = normalizeProjectPath(config.defaultProjectPath)
+  const resolvedProjectPath =
+    agentDefaultProjectPath ?? currentProjectPath ?? globalDefaultProjectPath
+  if (agentDefaultProjectPath) {
+    projectStore.selectProject(
+      agentDefaultProjectPath,
+      agentDefaultProjectPath === globalDefaultProjectPath ? 'default' : 'manual'
+    )
+  } else if (!currentProjectPath && globalDefaultProjectPath) {
+    projectStore.selectProject(globalDefaultProjectPath, 'default')
+  }
+  draftStore.projectDir = resolvedProjectPath ?? undefined
+  draftStore.providerId = config.defaultModelPreset?.providerId
+  draftStore.modelId = config.defaultModelPreset?.modelId
+  draftStore.permissionMode = config.permissionMode === 'default' ? 'default' : 'full_access'
+  draftStore.disabledAgentTools = [...(config.disabledAgentTools ?? [])]
+  draftStore.subagentEnabled = config.subagentEnabled === true
+  Object.assign(draftStore, buildDraftGenerationSettings(config))
 }
 
 function onAttach() {
   chatInputRef.value?.triggerAttach()
 }
 
-function onFilesChange(files: ChatMessageFile[]) {
+function onFilesChange(files: MessageFile[]) {
   attachedFiles.value = files
 }
 
@@ -291,7 +469,7 @@ const ensureAcpDraftSession = async (agentId: string, projectPath: string) => {
   const requestSeq = ++acpDraftRequestSeq.value
 
   try {
-    const session = await newAgentPresenter.ensureAcpDraftSession({
+    const session = await agentSessionPresenter.ensureAcpDraftSession({
       agentId,
       projectDir,
       permissionMode: draftStore.permissionMode
@@ -327,7 +505,7 @@ watch(
   () => [agentStore.selectedAgentId, projectStore.selectedProject?.path] as const,
   ([selectedAgentId, projectPath]) => {
     acpDraftRequestSeq.value += 1
-    if (!selectedAgentId || selectedAgentId === 'deepchat' || !projectPath?.trim()) {
+    if (!selectedAgentId || selectedAgent.value.type === 'deepchat' || !projectPath?.trim()) {
       acpDraftSessionId.value = null
       lastAcpDraftKey.value = null
       return
@@ -337,11 +515,40 @@ watch(
   { immediate: true }
 )
 
+watch(
+  () => [selectedAgent.value.id, selectedAgent.value.type] as const,
+  () => {
+    const task = applyDraftDefaultsForSelectedAgent().finally(() => {
+      if (currentDraftDefaultsTask === task) {
+        currentDraftDefaultsTask = null
+      }
+    })
+    currentDraftDefaultsTask = task
+  },
+  { immediate: true }
+)
+
+watch(
+  () => projectStore.selectedProject?.path,
+  (projectDir) => {
+    draftStore.projectDir = projectDir
+  },
+  { immediate: true }
+)
+
+watch(
+  () => draftStore.pendingStartDeeplink?.token ?? 0,
+  () => {
+    const pendingStartDeeplink = draftStore.pendingStartDeeplink
+    if (!pendingStartDeeplink) {
+      return
+    }
+    void applyStartDeeplink(pendingStartDeeplink)
+  },
+  { immediate: true }
+)
+
 onMounted(() => {
-  // Keep new-thread selection page-scoped: start each NewThread page with no manual override.
-  draftStore.providerId = undefined
-  draftStore.modelId = undefined
-  draftStore.permissionMode = 'full_access'
-  draftStore.resetGenerationSettings()
+  draftStore.projectDir = projectStore.selectedProject?.path
 })
 </script>

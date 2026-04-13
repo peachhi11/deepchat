@@ -10,7 +10,17 @@
         @click="selectIndex(index)"
       >
         <div class="flex items-start gap-2">
-          <span class="mt-0.5 text-xs text-muted-foreground">{{ categoryTag(item.category) }}</span>
+          <span
+            class="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center text-xs text-muted-foreground"
+          >
+            <Icon
+              v-if="item.category === 'command'"
+              icon="lucide:command"
+              data-icon="lucide:command"
+              class="h-3.5 w-3.5"
+            />
+            <span v-else>{{ categoryTag(item.category) }}</span>
+          </span>
           <div class="flex-1 min-w-0">
             <div class="truncate font-medium">{{ item.label }}</div>
             <div v-if="item.description" class="truncate text-xs text-muted-foreground">
@@ -26,6 +36,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { Icon } from '@iconify/vue'
 
 export type SuggestionCategory = 'file' | 'command' | 'skill' | 'prompt' | 'tool'
 
@@ -46,19 +57,7 @@ const props = defineProps<{
 const selectedIndex = ref(0)
 const itemElements = ref<(HTMLButtonElement | null)[]>([])
 
-const filteredItems = computed(() => {
-  const query = props.query.trim().toLowerCase()
-  if (!query) {
-    return props.items.slice(0, 20)
-  }
-
-  return props.items
-    .filter((item) => {
-      if (item.label.toLowerCase().includes(query)) return true
-      return item.description?.toLowerCase().includes(query)
-    })
-    .slice(0, 20)
-})
+const filteredItems = computed(() => props.items)
 
 watch(
   () => filteredItems.value.length,

@@ -15,5 +15,9 @@
   "settings-mcp-market": "MCP 시장",
   "settings-acp": "ACP 프록시",
   "settings-skills": "Skills",
-  "settings-notifications-hooks": "알림 및 훅"
+  "settings-notifications-hooks": "훅",
+  "settings-dashboard": "Dashboard",
+  "settings-environments": "환경",
+  "settings-remote": "원격 제어",
+  "settings-deepchat-agents": "DeepChat 에이전트"
 }

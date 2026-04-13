@@ -2,6 +2,12 @@ import { describe, expect, it, vi } from 'vitest'
 import { defineComponent, h, reactive } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
 
+const passthrough = (name: string) =>
+  defineComponent({
+    name,
+    template: '<div><slot /></div>'
+  })
+
 const chatInputTriggerAttachMock = vi.fn()
 const chatInputPendingSkillsSnapshotRef: { value: string[] } = { value: [] }
 
@@ -38,16 +44,35 @@ const setup = async (options?: {
     projectDir: string
     permissionMode?: string
   }) => Promise<{ id: string } | null>
+  selectedProject?: {
+    path: string
+    name: string
+  }
+  defaultProjectPath?: string | null
+  defaultModel?: { providerId: string; modelId: string }
+  preferredModel?: { providerId: string; modelId: string }
+  resolvedAgentConfig?: Record<string, unknown>
 }) => {
   vi.resetModules()
   chatInputTriggerAttachMock.mockReset()
   chatInputPendingSkillsSnapshotRef.value = []
 
   const projectStore = reactive({
-    selectedProject: { path: '/tmp/workspace', name: 'workspace' },
-    selectedProjectName: 'workspace',
+    selectedProject: (options?.selectedProject ?? {
+      path: '/tmp/workspace',
+      name: 'workspace'
+    }) as { path: string; name: string } | null,
+    selectedProjectName: options?.selectedProject?.name ?? 'workspace',
+    defaultProjectPath: options?.defaultProjectPath ?? null,
     projects: [],
-    selectProject: vi.fn(),
+    selectProject: vi.fn((path: string | null) => {
+      projectStore.selectedProject = path
+        ? {
+            path,
+            name: path.split(/[/\\]/).pop() ?? path
+          }
+        : null
+    }),
     openFolderPicker: vi.fn()
   })
 
@@ -67,9 +92,11 @@ const setup = async (options?: {
   })
 
   const draftStore = reactive({
+    projectDir: projectStore.selectedProject?.path ?? undefined,
     providerId: undefined as string | undefined,
     modelId: undefined as string | undefined,
     permissionMode: 'full_access' as const,
+    disabledAgentTools: [] as string[],
     systemPrompt: undefined as string | undefined,
     temperature: undefined as number | undefined,
     contextLength: undefined as number | undefined,
@@ -82,10 +109,24 @@ const setup = async (options?: {
   })
 
   const configPresenter = {
-    getSetting: vi.fn().mockResolvedValue(undefined)
+    getSetting: vi.fn((key: string) => {
+      if (key === 'defaultModel') {
+        return Promise.resolve(options?.defaultModel)
+      }
+      if (key === 'preferredModel') {
+        return Promise.resolve(options?.preferredModel)
+      }
+      return Promise.resolve(undefined)
+    }),
+    resolveDeepChatAgentConfig: vi.fn().mockResolvedValue(
+      options?.resolvedAgentConfig ?? {
+        disabledAgentTools: [],
+        permissionMode: 'full_access'
+      }
+    )
   }
 
-  const newAgentPresenter = {
+  const agentSessionPresenter = {
     ensureAcpDraftSession: vi.fn().mockImplementation(
       options?.ensureAcpDraftSession ??
         (() => {
@@ -111,17 +152,26 @@ const setup = async (options?: {
   }))
   vi.doMock('@/composables/usePresenter', () => ({
     usePresenter: (name: string) =>
-      name === 'configPresenter' ? configPresenter : newAgentPresenter
+      name === 'configPresenter' ? configPresenter : agentSessionPresenter
+  }))
+  vi.doMock('vue-i18n', () => ({
+    useI18n: () => ({
+      t: (key: string) => key,
+      locale: { value: 'zh-CN' }
+    })
   }))
 
   vi.doMock('@/components/chat/ChatInputBox.vue', () => ({
     default: createChatInputBoxStub()
   }))
   vi.doMock('@/components/chat/ChatInputToolbar.vue', () => ({
-    default: defineComponent({ name: 'ChatInputToolbar', template: '<div />' })
+    default: passthrough('ChatInputToolbar')
   }))
   vi.doMock('@/components/chat/ChatStatusBar.vue', () => ({
-    default: defineComponent({ name: 'ChatStatusBar', template: '<div />' })
+    default: passthrough('ChatStatusBar')
+  }))
+  vi.doMock('@shadcn/components/ui/tooltip', () => ({
+    TooltipProvider: passthrough('TooltipProvider')
   }))
 
   const NewThreadPage = (await import('@/pages/NewThreadPage.vue')).default
@@ -152,15 +202,30 @@ const setup = async (options?: {
     agentStore,
     modelStore,
     draftStore,
-    newAgentPresenter
+    agentSessionPresenter
   }
 }
 
 describe('NewThreadPage ACP draft session bootstrap', () => {
-  it('ensures ACP draft session and passes session-id to ChatInputBox', async () => {
-    const { wrapper, newAgentPresenter } = await setup()
+  it('uses the preselected project path when default project selection is already applied', async () => {
+    const { agentSessionPresenter } = await setup({
+      selectedProject: {
+        path: '/tmp/default-workspace',
+        name: 'default-workspace'
+      }
+    })
 
-    expect(newAgentPresenter.ensureAcpDraftSession).toHaveBeenCalledWith({
+    expect(agentSessionPresenter.ensureAcpDraftSession).toHaveBeenCalledWith({
+      agentId: 'acp-agent',
+      projectDir: '/tmp/default-workspace',
+      permissionMode: 'full_access'
+    })
+  })
+
+  it('ensures ACP draft session and passes session-id to ChatInputBox', async () => {
+    const { wrapper, agentSessionPresenter } = await setup()
+
+    expect(agentSessionPresenter.ensureAcpDraftSession).toHaveBeenCalledWith({
       agentId: 'acp-agent',
       projectDir: '/tmp/workspace',
       permissionMode: 'full_access'
@@ -198,6 +263,7 @@ describe('NewThreadPage ACP draft session bootstrap', () => {
     ]
     draftStore.providerId = 'openai'
     draftStore.modelId = 'gpt-4'
+    draftStore.disabledAgentTools = ['exec', 'cdp_send']
     ;(draftStore.toGenerationSettings as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
       systemPrompt: 'Preset prompt',
       temperature: 1.2,
@@ -216,12 +282,120 @@ describe('NewThreadPage ACP draft session bootstrap', () => {
         message: 'hello deepchat',
         files: [{ name: 'plan.md', path: '/tmp/workspace/plan.md', mimeType: 'text/markdown' }],
         agentId: 'deepchat',
+        disabledAgentTools: ['exec', 'cdp_send'],
         generationSettings: {
           systemPrompt: 'Preset prompt',
           temperature: 1.2,
           contextLength: 8192,
           maxTokens: 2048
         }
+      })
+    )
+  })
+
+  it('prefers the agent default directory over the current selection', async () => {
+    const { projectStore, agentStore, draftStore } = await setup({
+      defaultProjectPath: '/workspaces/global',
+      resolvedAgentConfig: {
+        defaultProjectPath: '/workspaces/agent-writer',
+        disabledAgentTools: [],
+        permissionMode: 'full_access'
+      }
+    })
+
+    agentStore.selectedAgentId = 'deepchat'
+    await flushPromises()
+
+    expect(projectStore.selectProject).toHaveBeenCalledWith('/workspaces/agent-writer', 'manual')
+    expect(projectStore.selectedProject).toEqual({
+      path: '/workspaces/agent-writer',
+      name: 'agent-writer'
+    })
+    expect(draftStore.projectDir).toBe('/workspaces/agent-writer')
+  })
+
+  it('prefers preferredModel over defaultModel when creating a deepchat session', async () => {
+    const { wrapper, sessionStore, agentStore, modelStore } = await setup({
+      defaultModel: { providerId: 'openai', modelId: 'gpt-4' },
+      preferredModel: { providerId: 'zenmux', modelId: 'moonshotai/kimi-k2.5' }
+    })
+
+    agentStore.selectedAgentId = 'deepchat'
+    modelStore.enabledModels = [
+      {
+        providerId: 'openai',
+        models: [{ id: 'gpt-4', name: 'GPT-4' }]
+      },
+      {
+        providerId: 'zenmux',
+        models: [{ id: 'moonshotai/kimi-k2.5', name: 'Kimi K2.5' }]
+      }
+    ]
+    ;(wrapper.vm as any).message = 'hello preferred model'
+
+    await (wrapper.vm as any).onSubmit()
+    await flushPromises()
+
+    expect(sessionStore.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerId: 'zenmux',
+        modelId: 'moonshotai/kimi-k2.5'
+      })
+    )
+  })
+
+  it('falls back to defaultModel when preferredModel is not enabled', async () => {
+    const { wrapper, sessionStore, agentStore, modelStore } = await setup({
+      defaultModel: { providerId: 'openai', modelId: 'gpt-4' },
+      preferredModel: { providerId: 'zenmux', modelId: 'moonshotai/kimi-k2.5' }
+    })
+
+    agentStore.selectedAgentId = 'deepchat'
+    modelStore.enabledModels = [
+      {
+        providerId: 'openai',
+        models: [{ id: 'gpt-4', name: 'GPT-4' }]
+      }
+    ]
+    ;(wrapper.vm as any).message = 'hello default model'
+
+    await (wrapper.vm as any).onSubmit()
+    await flushPromises()
+
+    expect(sessionStore.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerId: 'openai',
+        modelId: 'gpt-4'
+      })
+    )
+  })
+
+  it('falls back to the first enabled model when saved models are unavailable', async () => {
+    const { wrapper, sessionStore, agentStore, modelStore } = await setup({
+      defaultModel: { providerId: 'openai', modelId: 'gpt-4' },
+      preferredModel: { providerId: 'zenmux', modelId: 'moonshotai/kimi-k2.5' }
+    })
+
+    agentStore.selectedAgentId = 'deepchat'
+    modelStore.enabledModels = [
+      {
+        providerId: 'anthropic',
+        models: [{ id: 'claude-3-5-sonnet', name: 'Claude 3.5 Sonnet' }]
+      },
+      {
+        providerId: 'openai',
+        models: [{ id: 'gpt-4.1', name: 'GPT-4.1' }]
+      }
+    ]
+    ;(wrapper.vm as any).message = 'hello first enabled model'
+
+    await (wrapper.vm as any).onSubmit()
+    await flushPromises()
+
+    expect(sessionStore.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerId: 'anthropic',
+        modelId: 'claude-3-5-sonnet'
       })
     )
   })

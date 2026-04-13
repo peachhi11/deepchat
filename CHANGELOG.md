@@ -1,5 +1,84 @@
 # Changelog
 
+## v1.0.3-beta.1 (2026-04-11)
+- Migrated model requests to the AI SDK runtime, improving prompt cache behavior, provider consistency, and streaming stability
+- Added NewAPI provider support and refined compatible endpoint configuration
+- Improved model management with more stable provider toggles and synchronized Ollama selectable model status
+- Added `skill_view` draft flow and automatic tool activation after skill previews to smooth skill setup
+- Enhanced Markdown and workspace link navigation, added sidebar panel toggle hotkeys, and fixed artifact viewer sizing in the side panel
+- 将模型请求迁移到 AI SDK 运行时，进一步改善 Prompt Cache 表现、Provider 一致性与流式稳定性
+- 新增 NewAPI Provider 支持，并完善兼容端点配置体验
+- 改进模型管理，修复 Provider 模型开关稳定性并同步 Ollama 可选模型状态
+- 新增 `skill_view` 草稿流，并在技能预览后自动激活工具，减少技能接入摩擦
+- 优化 Markdown 与工作区链接跳转体验，新增侧栏面板切换快捷键，并修复侧边栏制品预览高度问题
+
+## v1.0.2 (2026-04-08)
+- Added provider model list filtering and sorting, and now remembers the sidebar session grouping mode
+- Added ACP Agent uninstall support and refined provider prompt cache configuration
+- Improved remote delivery ordering for Telegram and Feishu, and fixed db-backed model list sync stability
+- Refined dashboard and settings responsiveness, and fixed auto compact settings persistence
+- 新增 Provider 模型列表筛选排序能力，并记住侧边栏会话分组方式
+- 新增 ACP Agent 卸载支持，并完善 Provider Prompt Cache 配置体验
+- 优化 Telegram 与 Feishu 远程消息投递顺序，修复数据库驱动模型列表同步稳定性
+- 改进仪表盘与设置页响应式布局，并修复自动压缩设置保存问题
+
+## v1.0.1 (2026-04-02)
+- Added in-chat search and Spotlight global search for faster access to messages and app entry points
+- Improved the provider database refresh flow and added manual model config refresh
+- Updated the Markdown renderer preprocessing flow to improve rendering stability
+- Fixed rate limit handling to reduce failures and degraded request experience
+- 新增会话内搜索与 Spotlight 全局搜索，方便快速定位历史消息与应用入口
+- 优化 Provider 数据库刷新流程，支持手动刷新模型配置
+- 更新 Markdown 渲染器预处理逻辑，提升消息渲染稳定性
+- 修复速率限制处理问题，减少请求受限时的异常体验
+
+## v1.0.0 (2026-03-31)
+- DeepChat 1.0 正式发布：完成全新 Agent 架构切换，统一 DeepChat Agent 与 ACP Agent 主流程，并内置 DimCode Agent
+- 新增远程控制能力矩阵：支持 Telegram、Feishu 与 ACP Agent Remote，补齐权限消息、流式块渲染与工作目录选择
+- 强化工作流与工具链：支持 RTK 工具调用、Environments、Provider Deeplink 导入、Workspace 拖拽引用与 DeepChat Sub Agent 协作
+- 持续打磨桌面端体验：新增浮动窗口、用户仪表盘、自动压缩控制，并优化侧边栏、悬浮按钮、状态栏与工具调用交互
+- 完成正式版稳定性收敛：修复 HTML 预览、主题同步、消息标题选择、会话工作目录、MCP 生命周期与历史序列化等问题
+
+## v1.0.0-beta.7 (2026-03-27)
+- 新增 Novita AI LLM 提供商接入
+- 新增 Provider 配置导入能力（Deeplink 导入）
+- 新增 Feishu Bot 远端接入能力
+- 改进悬浮窗与侧边栏交互体验：SessionItem 由右键菜单切换为 hover/浮层交互，浮动按钮 hover 与透明度细节优化
+- 修复消息标题选择与 MCP 生命周期相关稳定性问题，并清理已过期 MCP Server
+
+## v1.0.0-beta.6 (2026-03-24)
+- 新增 Telegram Remote Control，可通过 Telegram 远程查看与驱动会话，远程控制配置也已接入设置页
+- 统一 DeepChat Agent 与 ACP Agent 的 Agent 能力和入口，补齐欢迎页、本地化文案与默认配置，整体使用路径更一致
+- 优化会话默认工作目录传递，修复 Agent / ACP / Skills 在 session workdir 继承上的问题
+- 强化启动与工具输出稳定性，修复 Splash 窗口显示时机，并为大体量工具输出增加保护与批处理适配
+- 移除过时 MCP UI 支持，修复 OpenAI Responses 历史序列化问题，同时继续打磨状态同步与路由细节
+
+## v1.0.0-beta.5 (2026-03-22)
+- 优化启动 Splash 窗口与 ACP 配置加载提示，启动过程更直观
+- 支持 ACP Registry 搜索安装与 ACP 模型选择，ACP Agent 配置体验继续完善
+- 新增会话 steer / queue 能力，支持待发送消息排队、转向与恢复处理
+- 打磨工具调用卡片、状态栏控制与更新入口，整体交互更顺手
+- 修复 OpenAI Compatible MCP 工具、interleaved thinking，以及队列与 stop 状态同步等问题
+
+## v1.0.0-beta.4 (2026-03-18)
+- 新增浮动窗口，全新效果一目了然
+- 增加用户仪表盘，token使用一目了然
+- 重构内建工具链，支持 RTK 工具调用，控制和性能都有提升
+- 新增 Environments 设置，方便为不同场景管理独立运行配置
+- 修复全新安装时 SQLite 迁移冲突问题，提升首次启动稳定性
+
+## v1.0.0-beta.3 (2026-03-18, withdrawn)
+- 新增浮动窗口，全新效果一目了然
+- 增加用户仪表盘，token使用一目了然
+- 重构内建工具链，支持 RTK 工具调用，控制和性能都有提升
+- 统一 Workspace 生命周期刷新，清理旧代码，提升整体稳定性
+
+## v1.0.0-beta.2 (2026-03-13)
+- 新增自动压缩控制，可在设置中配置会话摘要压缩行为
+- 优化 Yo Browser 生命周期与迁移流程，提升稳定性
+- 强化 Skills 运行时执行安全，并补齐欢迎页自定义能力
+- 修复多项界面问题，包括 Agent 文案对齐、语音输入按钮显示与悬浮按钮细节
+
 ## v1.0.0-beta.1 (2026-03-09)
 - 全新 Agent 架构：重构 Agent UI 与 Agent Loop，模块化流处理，统一代码路径
 - 移除 Chat 模式：简化模式选择，仅保留 Agent 和 ACP Agent 两种模式

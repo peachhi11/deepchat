@@ -6,6 +6,8 @@
     "functionSwitch": "Function Switch",
     "attach": "Attach",
     "voiceInput": "Voice input",
+    "queue": "Queue",
+    "stop": "Stop",
     "fileSelect": "Select File",
     "pasteFiles": "Paste files from clipboard",
     "dropFiles": "Drop files here",
@@ -33,7 +35,34 @@
       "title": "Enabled MCP",
       "empty": "No enabled services",
       "openSettings": "Open MCP settings"
+    },
+    "tools": {
+      "badge": "Tools",
+      "title": "Tools",
+      "mcpSection": "MCP",
+      "builtinSection": "Built-in Tools",
+      "loading": "Loading tools...",
+      "builtinEmpty": "No built-in tools available",
+      "groups": {
+        "agentFilesystem": "Agent Filesystem",
+        "agentCore": "Agent Core",
+        "agentSkills": "Agent Skills",
+        "deepchatSettings": "DeepChat Settings",
+        "yobrowser": "YoBrowser"
+      }
     }
+  },
+  "pendingInput": {
+    "steer": "Steer",
+    "queueCount": "Queued {count}/{max}",
+    "resumeQueue": "Resume sending",
+    "toSteer": "Steer",
+    "locked": "Locked",
+    "reorder": "Reorder",
+    "files": "{count} files",
+    "attachmentsOnly": "{count} attachments",
+    "empty": "Empty message",
+    "limitReached": "Waiting lane is full (max {max})."
   },
   "features": {
     "webSearch": "Web Search",
@@ -54,6 +83,7 @@
   "messages": {
     "thinking": "Thinking...",
     "rateLimitWaiting": "Rate limit reached, waiting in queue...",
+    "rateLimitCompactLoading": "Rate limited for {seconds}s...",
     "rateLimitTitle": "Rate Limit Active",
     "rateLimitQueue": "Queue Position",
     "rateLimitEstimated": "Estimated Wait",
@@ -76,23 +106,6 @@
     "generationComplete": "Generation is complete",
     "generationError": "Generation failed"
   },
-  "navigation": {
-    "title": "Message Navigation",
-    "searchPlaceholder": "Search messages...",
-    "noResults": "No matching messages found",
-    "noMessages": "No messages yet",
-    "totalMessages": "{count} messages total",
-    "searchResults": "Found {count} results in {total} messages",
-    "userMessage": "User message",
-    "assistantMessage": "Assistant reply",
-    "unknownMessage": "Unknown message"
-  },
-  "mcpUi": {
-    "title": "MCP UI",
-    "badge": "UI",
-    "expand": "Expand",
-    "collapse": "Collapse"
-  },
   "toolCall": {
     "title": "Tool Call",
     "calling": "Tool call in progress",
@@ -102,7 +115,24 @@
     "clickToView": "Click to view details",
     "functionName": "Function",
     "params": "Parameters",
-    "responseData": "Response data"
+    "responseData": "Response data",
+    "subagents": {
+      "summary": "{mode} · {count} subagents",
+      "unnamedTask": "Unnamed task",
+      "mode": {
+        "parallel": "Parallel",
+        "chain": "Chain"
+      },
+      "status": {
+        "queued": "Queued",
+        "running": "Running",
+        "completed": "Completed",
+        "error": "Error",
+        "cancelled": "Cancelled",
+        "waiting_permission": "Waiting for permission",
+        "waiting_question": "Waiting for input"
+      }
+    }
   },
   "mode": {
     "current": "Current mode: {mode}",
@@ -110,8 +140,12 @@
     "acpAgent": "ACP Agent"
   },
   "topbar": {
+    "backToParent": "Back to Parent",
     "share": "Share",
     "more": "More"
+  },
+  "subagents": {
+    "label": "Subagents"
   },
   "advancedSettings": {
     "button": "Advanced",
@@ -124,9 +158,23 @@
     "maxTokens": "Max Tokens",
     "thinkingBudget": "Thinking Budget",
     "verbosity": "Verbosity",
+    "forceInterleavedThinkingCompat": "Interleaved Thinking",
+    "forceInterleavedThinkingCompatDescription": "Controls whether this session handles reasoning and tool-call messages with Interleaved Thinking.",
     "verbosityPlaceholder": "Select verbosity",
     "currentCustomPrompt": "Current custom",
-    "useDefault": "Use default"
+    "useDefault": "Use default",
+    "decreaseValue": "Decrease {label}",
+    "increaseValue": "Increase {label}",
+    "toggleValue": "Toggle {label}",
+    "validation": {
+      "finiteNumber": "Must be a finite number",
+      "nonNegativeInteger": "Must be a non-negative integer",
+      "contextLengthAtLeastMaxTokens": "Must be greater than or equal to Max Tokens",
+      "maxTokensWithinContextLength": "Must be less than or equal to Context Length"
+    }
+  },
+  "modelPicker": {
+    "empty": "No models found"
   },
   "audio": {
     "play": "Play",
@@ -141,11 +189,11 @@
   },
   "skills": {
     "indicator": {
-      "active": "{count} skills active",
-      "none": "No skills active"
+      "active": "{count} pinned skills",
+      "none": "No pinned skills"
     },
     "panel": {
-      "title": "Skills",
+      "title": "Pinned Skills",
       "manage": "Manage",
       "empty": "No skills installed"
     }
@@ -156,7 +204,8 @@
     "sections": {
       "files": "Files",
       "git": "Git",
-      "artifacts": "Artifacts"
+      "artifacts": "Artifacts",
+      "subagents": "Subagents"
     },
     "plan": {
       "section": "Plan",
@@ -184,6 +233,15 @@
       "clean": "Clean working tree",
       "staged": "Staged",
       "unstaged": "Unstaged"
+    },
+    "subagents": {
+      "empty": "No child sessions yet",
+      "self": "Self",
+      "status": {
+        "working": "Running",
+        "error": "Error",
+        "idle": "Idle"
+      }
     },
     "browser": {
       "section": "Browser",
@@ -214,6 +272,19 @@
   "newThread": {
     "title": "Build and explore"
   },
+  "floatingWidget": {
+    "title": "DeepChat",
+    "collapse": "Collapse floating sessions",
+    "empty": "No DeepChat sessions yet",
+    "executing": "active",
+    "sessionCount": "{count} sessions",
+    "untitled": "New Chat",
+    "status": {
+      "inProgress": "In progress",
+      "done": "Done",
+      "error": "Error"
+    }
+  },
   "permissionMode": {
     "default": "Default permissions",
     "fullAccess": "Full access"
@@ -222,9 +293,44 @@
     "allAgents": "All Agents",
     "expandSidebar": "Expand sidebar",
     "collapseSidebar": "Collapse sidebar",
+    "remoteControlDisabled": "Disabled",
+    "remoteControlStatus": {
+      "disabled": "Remote control disabled",
+      "stopped": "Remote control stopped",
+      "starting": "Remote control starting",
+      "running": "Remote control running",
+      "backoff": "Remote control retrying",
+      "error": "Remote control error"
+    },
     "groupByDate": "Group by date",
     "groupByProject": "Group by project",
+    "pinned": "Pinned",
     "emptyTitle": "No conversations yet",
-    "emptyDescription": "Start a new chat to begin"
+    "emptyDescription": "Start a new chat to begin",
+    "searchPlaceholder": "Search chats",
+    "searchAriaLabel": "Search chats",
+    "searchEmptyTitle": "No matching conversations",
+    "searchEmptyDescription": "Try a different title keyword"
+  },
+  "spotlight": {
+    "placeholder": "Search chats, agents, settings, actions…",
+    "searching": "Searching…",
+    "emptyTitle": "No matching results",
+    "emptyDescription": "Try another keyword or open a recent session.",
+    "hints": "↑↓ move · Enter open · Esc close · Home/End jump",
+    "kind": {
+      "session": "Session",
+      "message": "Message",
+      "agent": "Agent",
+      "setting": "Setting",
+      "action": "Action"
+    }
+  },
+  "inlineSearch": {
+    "placeholder": "Search in conversation",
+    "ariaLabel": "Search in current conversation",
+    "previous": "Previous match",
+    "next": "Next match",
+    "close": "Close search"
   }
 }

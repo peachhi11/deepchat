@@ -93,7 +93,6 @@ export type AssistantMessageBlock = {
     | 'image'
     | 'audio'
     | 'artifact-thinking'
-    | 'mcp_ui_resource'
   id?: string
   content?: string
   extra?: AssistantMessageExtra
@@ -119,13 +118,6 @@ export type AssistantMessageBlock = {
       | 'application/vnd.ant.mermaid'
       | 'application/vnd.ant.react'
     language?: string
-  }
-  mcp_ui_resource?: {
-    uri: string
-    mimeType: 'text/html' | 'text/uri-list' | 'application/vnd.mcp-ui.remote-dom'
-    text?: string
-    blob?: string
-    _meta?: Record<string, unknown>
   }
   tool_call?: {
     id?: string
@@ -187,6 +179,8 @@ export type AssistantMessageExtra = Record<string, string | number | object[] | 
   questionResolution?: 'asked' | 'replied' | 'rejected'
   answerText?: string
   answerMessageId?: string
+  subagentProgress?: string
+  subagentFinal?: string
 }
 // Search-related message block types
 export type SearchBlock = {

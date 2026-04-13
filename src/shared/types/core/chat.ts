@@ -57,7 +57,6 @@ export type AssistantMessageBlock = {
     | 'image'
     | 'audio'
     | 'artifact-thinking'
-    | 'mcp_ui_resource'
   content?: string
   extra?: Record<string, string | number | object[] | boolean>
   status:
@@ -83,18 +82,14 @@ export type AssistantMessageBlock = {
       | 'application/vnd.ant.react'
     language?: string
   }
-  mcp_ui_resource?: {
-    uri: string
-    mimeType: 'text/html' | 'text/uri-list' | 'application/vnd.mcp-ui.remote-dom'
-    text?: string
-    blob?: string
-    _meta?: Record<string, unknown>
-  }
   tool_call?: {
     id?: string
     name?: string
     params?: string
     response?: string
+    rtkApplied?: boolean
+    rtkMode?: 'rewrite' | 'direct' | 'bypass'
+    rtkFallbackReason?: string
     server_name?: string
     server_icons?: string
     server_description?: string
@@ -111,6 +106,7 @@ export type AssistantMessageBlock = {
 export type {
   ChatMessage,
   ChatMessageContent,
+  ChatMessageProviderOptions,
   ChatMessageRole,
   ChatMessageToolCall
 } from './chat-message'

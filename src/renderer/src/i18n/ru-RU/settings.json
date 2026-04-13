@@ -61,12 +61,23 @@
     "fileMaxSizeHint": "Ограничивает максимальный размер загружаемого файла",
     "defaultModel": {
       "title": "Модель по умолчанию",
-      "chatModel": "Модель чата по умолчанию",
-      "visionModel": "Визуальная модель по умолчанию"
+      "chatModel": "Модель чата по умолчанию"
+    },
+    "autoCompaction": {
+      "title": "Автосжатие",
+      "enabled": "Включить автосжатие",
+      "description": "Когда диалог приближается к пределу окна контекста модели, DeepChat может автоматически сжимать более старую историю, чтобы сессия продолжалась. Если функция отключена, история сверх бюджета будет сразу отброшена вместо сжатия.",
+      "thresholdLabel": "Порог срабатывания",
+      "thresholdMin": "Раньше ({value}%)",
+      "thresholdMax": "Позже ({value}%)",
+      "thresholdDescription": "Начинать сжатие, когда использование промпта достигает этой доли эффективного бюджета истории. Меньшие значения оставляют больше запаса, большие значения сохраняют больше исходного контекста.",
+      "retainPairsLabel": "Сохранять последние пары сообщений",
+      "retainPairsValue": "{count} пар",
+      "retainPairsDescription": "Сохранять вне сжатия последние завершённые пары сообщений пользователя и ассистента. Текущий запрос не включается."
     }
   },
   "notificationsHooks": {
-    "title": "Уведомления и хуки",
+    "title": "Хуки",
     "description": "Настройте webhook-уведомления и хуки жизненного цикла.",
     "events": {
       "title": "События",
@@ -160,6 +171,18 @@
       "backupSuccessTitle": "Резервное копирование выполнено успешно",
       "backupSuccessMessage": "Резервное копирование данных успешно выполнено"
     },
+    "modelConfigUpdate": {
+      "title": "Обновить конфигурацию моделей",
+      "description": "Принудительно обновляет provider.json из источника, чтобы подтянуть актуальные возможности моделей и настройки по умолчанию.",
+      "button": "Обновить сейчас",
+      "updating": "Обновление...",
+      "updatedTitle": "Конфигурация моделей обновлена",
+      "updatedDescription": "Получены актуальные метаданные провайдеров.",
+      "upToDateTitle": "Уже актуально",
+      "upToDateDescription": "Локальная конфигурация моделей уже использует актуальные метаданные провайдеров.",
+      "failedTitle": "Не удалось обновить",
+      "failedDescription": "Сейчас не удалось обновить конфигурацию моделей. Попробуйте позже."
+    },
     "yoBrowser": {
       "clearButton": "Очистить данные YoBrowser",
       "clearFailedDescription": "Повторите попытку или проверьте журналы для получения дополнительной информации.",
@@ -173,6 +196,109 @@
       "description": "Независимая песочница браузера, которая не использует файлы cookie и локальное хранилище совместно с основным приложением. Данные YoBrowser можно очистить одним щелчком мыши здесь.",
       "title": "Песочница YoBrowser"
     }
+  },
+  "dashboard": {
+    "badge": "Панель использования",
+    "title": "Панель использования",
+    "description": "Показывает расход токенов, попадания в кэш и оценочную стоимость. Данные по токенам и стоимости рассчитываются на основе открытой информации; у некоторых провайдеров или более ранних сообщений данные могут отсутствовать, поэтому используйте эти значения только как ориентир.",
+    "actions": {
+      "refresh": "Обновить"
+    },
+    "backfill": {
+      "runningTitle": "Обновление данных об использовании",
+      "runningDescription": "Данные об использовании всё ещё обновляются в фоновом режиме. Текущие результаты уже доступны для просмотра.",
+      "failedTitle": "Не удалось обновить данные об использовании",
+      "failedDescription": "Обновите эту страницу или попробуйте позже."
+    },
+    "error": {
+      "title": "Не удалось загрузить панель",
+      "description": "Попробуйте позже."
+    },
+    "empty": {
+      "title": "Статистики использования пока нет",
+      "description": "Расход токенов, попадания в кэш и оценочная стоимость появятся здесь, когда будут доступны данные об использовании.",
+      "historyNote": "Данные по токенам и стоимости рассчитываются на основе открытой информации. У некоторых провайдеров или более ранних сообщений данные могут отсутствовать, поэтому используйте эти значения только как ориентир."
+    },
+    "summary": {
+      "totalTokens": "Всего токенов",
+      "totalTokensDescription": "Показывает долю входных и выходных токенов в общем объёме.",
+      "inputTokensLabel": "Вход",
+      "outputTokensLabel": "Выход",
+      "cachedTokens": "Токены из кэша",
+      "cachedTokensDescription": "Токены промпта, полученные из кэша провайдера.",
+      "cachedTokensCachedLabel": "Кэш",
+      "cachedTokensUncachedLabel": "Без кэша",
+      "cacheHitRate": "Доля попаданий в кэш",
+      "cacheHitRateDescription": "Токены промпта из кэша, делённые на общее число входных токенов.",
+      "estimatedCost": "Оценочная стоимость",
+      "estimatedCostDescription": "Оценка в долларах США по тарифам провайдера или резервным тарифам AIHubMix.",
+      "estimatedCostTrendLabel": "Тренд за последние 30 дней",
+      "estimatedCostTrendEmpty": "За последние 30 дней расходов не зафиксировано.",
+      "recordingStartedAt": "Начало учёта",
+      "recordingStartedAtDescription": "Самая ранняя запись об использовании, которая сейчас хранится в этой панели.",
+      "withDeepChatDaysLabel": "Дней вместе",
+      "withDeepChatDaysValue": "{days} дней",
+      "withDeepChatDaysSentence": "Вы уже {days}‑й день с DeepChat.",
+      "withDeepChatDaysDescription": "На основе вашей самой ранней записи об использовании от {date}.",
+      "withDeepChatDaysDescriptionUnavailable": "Записей об использовании пока нет.",
+      "tokenUsage": "Расход токенов",
+      "nostalgiaLabel": "Былое",
+      "nostalgiaDaysValue": "{days} дн.",
+      "nostalgiaSessionsValue": "{count} сессий",
+      "nostalgiaMessagesValue": "{count} сообщений",
+      "nostalgiaDaysDetailLabel": "Вместе",
+      "nostalgiaDaysDetail": "Вы и DeepChat уже {days} дней вместе.",
+      "nostalgiaSessionsDetailLabel": "Сессии",
+      "nostalgiaSessionsDetail": "Вы провели вместе {count} сессий.",
+      "nostalgiaMessagesDetailLabel": "Сообщения",
+      "nostalgiaMessagesDetail": "Вы обменялись {count} сообщениями.",
+      "nostalgiaMostActiveDayLabel": "Самый активный день",
+      "nostalgiaMostActiveDayDetail": "{date} был вашим самым активным днём: {count} сообщений."
+    },
+    "calendar": {
+      "title": "Календарь активности",
+      "description": "Ежедневный расход токенов за последние 365 дней.",
+      "legend": "От меньшего к большему",
+      "tooltip": "{date}: {tokens} токенов"
+    },
+    "breakdown": {
+      "providerTitle": "Рейтинг провайдеров",
+      "providerDescription": "Сначала по оценочной стоимости, затем по общему числу токенов.",
+      "modelTitle": "Рейтинг моделей",
+      "modelDescription": "Топ-10 моделей по оценочной стоимости, затем по общему числу токенов.",
+      "messages": "{count} сообщений",
+      "empty": "Данных для разбивки пока нет."
+    },
+    "rtk": {
+      "title": "Экономия RTK",
+      "description": "Оценка количества токенов, которым RTK не дал попасть в контекст модели во время нативного выполнения команд DeepChat.",
+      "actions": {
+        "retry": "Повторить проверку"
+      },
+      "status": {
+        "disabled": "Отключено",
+        "checking": "Проверка",
+        "healthy": "Исправно",
+        "unhealthy": "Недоступно"
+      },
+      "descriptionDisabled": "RTK отключён для этой сессии приложения, поэтому команды выполняются по обычному пути.",
+      "descriptionChecking": "DeepChat проверяет, может ли RTK корректно работать в текущем окружении.",
+      "descriptionHealthy": "RTK активен для нативного выполнения команд DeepChat.",
+      "descriptionUnhealthy": "Проверка состояния RTK при запуске не прошла, поэтому он был отключён для этой сессии приложения.",
+      "sourceLabel": "Источник среды выполнения: {source}",
+      "source": {
+        "bundled": "Встроенный",
+        "system": "Системный",
+        "none": "Недоступно"
+      },
+      "summary": {
+        "savedTokens": "Сэкономленные токены",
+        "commands": "Отслеженные команды",
+        "avgSavingsPct": "Средняя экономия",
+        "outputTokens": "Отфильтрованный вывод"
+      }
+    },
+    "unavailable": "Недоступно"
   },
   "model": {
     "title": "Настройки модели",
@@ -203,6 +329,11 @@
     "provider": "Поставщик услуг",
     "providerSetting": "Настройки поставщика услуг",
     "selectModel": "Выберите модель",
+    "form": {
+      "id": {
+        "label": "Идентификатор"
+      }
+    },
     "modelConfig": {
       "cancel": "Отмена",
       "contextLength": {
@@ -238,6 +369,10 @@
       "reasoning": {
         "description": "Поддерживает ли модель способность рассуждать?",
         "label": "Способность рассуждать"
+      },
+      "interleavedThinking": {
+        "label": "Interleaved Thinking",
+        "description": "Определяет, будет ли эта модель обрабатывать сообщения рассуждений и tool-call в режиме Interleaved Thinking. Значения, заданные провайдером, применяются автоматически."
       },
       "thinkingBudget": {
         "label": "Бюджет размышлений",
@@ -316,6 +451,19 @@
         "options": {
           "chat": "генерация текста",
           "image": "Генерация изображений"
+        }
+      },
+      "endpointType": {
+        "label": "Тип конечной точки",
+        "description": "Выберите, какой upstream-протокол New API должен использовать для этой модели.",
+        "placeholder": "Выберите тип конечной точки",
+        "required": "Тип конечной точки обязателен",
+        "options": {
+          "openai": "OpenAI Chat",
+          "openai-response": "OpenAI Responses",
+          "anthropic": "Anthropic Messages",
+          "gemini": "Gemini Native",
+          "image-generation": "Генерация изображений"
         }
       }
     }
@@ -431,6 +579,20 @@
         "baseUrlPlaceholder": "Введите API URL",
         "enable": "Включить провайдер"
       },
+      "providerDeeplinkImport": {
+        "title": "Импорт провайдера",
+        "description": "Проверьте разобранную конфигурацию провайдера перед применением.",
+        "type": "Тип",
+        "url": "URL",
+        "key": "Ключ",
+        "overwriteWarning": "Этот импорт перезапишет текущую конфигурацию провайдера.",
+        "confirming": "Импорт..."
+      },
+      "baseUrlUnlock": {
+        "title": "Подтвердить изменение базового URL",
+        "description": "Изменять базовый URL для этого провайдера не рекомендуется. Неверный адрес конечной точки может привести к ошибкам запросов или другому непредвиденному поведению. Если вы понимаете риск, всё равно можно продолжить.",
+        "confirm": "Продолжить"
+      },
       "deleteProvider": {
         "title": "Подтверждение удаления провайдера",
         "content": "Вы уверены, что хотите удалить провайдера \"{name}\"? Это действие нельзя отменить.",
@@ -470,6 +632,9 @@
     "urlFormat": "Образец API: {defaultUrl}",
     "urlFormatFill": "Подставить в URL API",
     "openaiResponsesNotice": "OpenAI по умолчанию использует Responses API. Если сторонний endpoint поддерживает только Chat Completions, используйте провайдера OpenAI Completions.",
+    "modifyBaseUrl": "Изменить",
+    "baseUrlLockedHint": "Этот провайдер закреплён за рекомендуемым базовым URL, чтобы снизить риск ошибочной настройки.",
+    "refreshModelsWithMetadataHint": "Обновление этого провайдера сначала синхронизирует метаданные из upstream, а затем пересоберёт локальный список моделей.",
     "azureApiVersion": "Версия API",
     "safety": {
       "title": "Настройки безопасности",
@@ -508,32 +673,16 @@
       "backupSuccessTitle": "Резервное копирование завершено",
       "backupSuccessMessage": "Резервная копия сохранена (время: {time}, размер: {size})",
       "importSuccessTitle": "Импорт завершён",
-      "importSuccessMessage": "Успешно импортировано {count} бесед"
+      "importSuccessMessage": "Успешно импортировано {count} бесед",
+      "refreshModelsSuccessTitle": "Модели обновлены",
+      "refreshModelsSuccessDescription": "Для этого провайдера синхронизирован актуальный список моделей.",
+      "refreshModelsSuccessDescriptionWithMetadata": "Для этого провайдера синхронизированы upstream-метаданные и актуальный список моделей.",
+      "refreshModelsFailedTitle": "Не удалось обновить",
+      "refreshModelsFailedDescription": "Сейчас не удалось обновить модели этого провайдера. Попробуйте позже.",
+      "refreshModelsFailedDescriptionWithMetadata": "Сейчас не удалось синхронизировать upstream-метаданные и модели этого провайдера. Попробуйте позже."
     },
-    "anthropicApiKeyTip": "Пожалуйста, перейдите на антропную консоль, чтобы получить ключ API",
-    "anthropicConnected": "Антропическая связь",
-    "anthropicNotConnected": "Антропический не связан",
-    "anthropicOAuthTip": "Нажмите «Авторизировать» DeepChat для доступа к вашей антропной учетной записи",
-    "oauthLogin": "Оаут логин",
-    "authMethod": "Метод сертификации",
-    "authMethodPlaceholder": "Выберите метод аутентификации",
     "apiKeyLabel": "API ключ",
     "apiUrlLabel": "API URL",
-    "anthropicOAuthFlowTip": "Система автоматически откроет окно авторизации. Пожалуйста, вернитесь и введите код авторизации после авторизации.",
-    "anthropicBrowserOpened": "Внешний браузер открыт",
-    "anthropicCodeInstruction": "Пожалуйста, заполните авторизацию во внешнем браузере и вставьте полученный код авторизации в поле ввода ниже",
-    "browserOpenedSuccess": "Внешний браузер открыт, пожалуйста, заполните авторизацию",
-    "codeRequired": "Пожалуйста, введите код авторизации",
-    "inputOAuthCode": "Введите код авторизации",
-    "codeExchangeFailed": "Обмен кодом авторизации не удалось",
-    "invalidCode": "Неверный код авторизации",
-    "oauthCodeHint": "Пожалуйста, вставьте здесь код авторизации после завершения авторизации во внешнем браузере",
-    "oauthCodePlaceholder": "Пожалуйста, введите код авторизации ...",
-    "verifyConnection": "Проверить соединение",
-    "manageModels": "Управление моделями",
-    "anthropicOAuthActiveTip": "Аутентификация OAuth включена, вы можете использовать сервисы Anthropic напрямую",
-    "oauthVerifySuccess": "Соединение OAuth успешно проверено",
-    "oauthVerifyFailed": "Ошибка проверки соединения OAuth",
     "configurationSaved": "Конфигурация сохранена",
     "configurationUpdated": "Конфигурация обновлена",
     "dataRefreshed": "Данные были обновлены",
@@ -934,12 +1083,15 @@
     "goSettings": "Откройте настройки",
     "hideWindow": "Скрыть окно",
     "quitApp": "Отказаться от приложения",
+    "toggleSidebar": "Показать/скрыть боковую панель",
+    "toggleWorkspace": "Показать/скрыть рабочую область",
     "zoomIn": "Увеличить",
     "zoomOut": "Увеличить",
     "zoomReset": "Сбросить Zoom",
     "newWindow": "Откройте новое окно",
     "showHideWindow": "Показать/Скрыть окно",
     "newConversation": "Новый разговор",
+    "quickSearch": "Поиск Spotlight",
     "closeWindow": "Закройте текущую страницу вкладки"
   },
   "rateLimit": {
@@ -1101,14 +1253,64 @@
       "send": "Отправить запрос",
       "sending": "Отправка…",
       "title": "Отладка ACP",
-      "workdirPlaceholder": "Оставьте пустым, чтобы использовать рабочий каталог по умолчанию."
+      "workdirPlaceholder": "Оставьте пустым, чтобы использовать рабочий каталог по умолчанию.",
+      "healthCheck": "Health Check",
+      "healthChecking": "检查中...",
+      "healthCheckFailed": "健康检查失败"
     },
     "mcpAccessBadge": "MCP {count}",
     "mcpAccessEmpty": "В настоящее время не существует дополнительного MCP.",
-    "mcpAccessTitle": "Доступные MCP"
+    "mcpAccessTitle": "Доступные MCP",
+    "registryCount": "{count} 个 Agent",
+    "registryEmpty": "当前筛选条件下没有可用的 Registry Agent。",
+    "registryRefresh": "刷新 Registry",
+    "registryRepair": "修复",
+    "registrySearchPlaceholder": "搜索 ACP Registry Agent...",
+    "filters": {
+      "all": "全部状态",
+      "enabled": "仅看已启用",
+      "installed": "仅看已安装",
+      "attention": "仅看待处理"
+    },
+    "envOverrideTitle": "环境变量覆盖",
+    "envOverridePlaceholder": "每行一个 KEY=VALUE",
+    "installState": {
+      "installed": "已安装",
+      "installing": "安装中",
+      "error": "安装失败",
+      "notInstalled": "未安装"
+    },
+    "registryInstallEntry": "Install Agent",
+    "registryInstallEntryDescription": "Search and install agents from the ACP Registry, then come back here to enable and configure them.",
+    "sharedMcpTitle": "Shared MCP",
+    "sharedMcpDescription": "All ACP agents share the same MCP access selection.",
+    "installedSectionTitle": "Installed Agents",
+    "installedSectionDescription": "Only installed registry agents appear here for enablement, inspection, and env overrides.",
+    "installedCount": "{count} installed",
+    "installedEmptyTitle": "No installed registry agents yet",
+    "installedEmptyDescription": "Install an agent from the ACP Registry first, then configure it here.",
+    "registryOverlayEmpty": "No agents match the current filters.",
+    "registryInstallAction": "Install",
+    "registryUninstallAction": "Удалить",
+    "registryUninstallConfirm": "Удалить агента «{name}»?",
+    "registryUninstallDescription": "DeepChat отключит этого агента и, если применимо, очистит локально управляемые данные установки. При необходимости его можно снова установить из ACP Registry.",
+    "registryUninstallFailed": "Не удалось удалить агента",
+    "registryInstallTitle": "ACP Registry",
+    "registryInstallDescription": "Search, filter, and install ACP agents. Configure them back in settings after installation.",
+    "registryLearnMore": "Learn More",
+    "registryRepository": "Repository",
+    "installFilters": {
+      "all": "All",
+      "installed": "Installed",
+      "notInstalled": "Not Installed"
+    }
   },
   "skills": {
     "addSkill": "Добавить навык",
+    "draftSuggestions": {
+      "title": "Предлагать черновики навыков",
+      "description": "После завершения задачи разрешите Agent предлагать временные переиспользуемые черновики навыков. Черновики будут храниться во временной папке, пока вы не решите импортировать их вручную."
+    },
     "conflict": {
       "description": "Навык с именем «{name}» уже существует. Заменить его?",
       "overwrite": "покрытие",
@@ -1139,7 +1341,24 @@
       "placeholder": "Здесь редактировать содержимое skill...",
       "readFailed": "Ошибка чтения",
       "success": "Успешно сохранено",
-      "title": "Редактировать навык"
+      "title": "Редактировать навык",
+      "runtimeTitle": "Runtime",
+      "runtimeHint": "Select how bundled scripts resolve Python and Node runtimes.",
+      "pythonRuntime": "Python Runtime",
+      "nodeRuntime": "Node Runtime",
+      "envTitle": "Environment Variables",
+      "envWarning": "Masked in the UI only. Values are stored as plain text in the skill sidecar file.",
+      "scriptsTitle": "Bundled Scripts",
+      "scriptsHint": "Only scripts under scripts/ can be run via skill_run.",
+      "noScripts": "No runnable scripts detected",
+      "scriptEnabled": "Enabled",
+      "scriptDescription": "Description Override",
+      "scriptDescriptionPlaceholder": "Optional description shown to the agent",
+      "runtime": {
+        "auto": "Автопереход",
+        "system": "Системная среда выполнения",
+        "builtin": "Встроенная среда выполнения"
+      }
     },
     "empty": "Временно нет навыков",
     "emptyHint": "Нажмите кнопку «Добавить skill», чтобы установить новый skill",
@@ -1256,6 +1475,218 @@
       "syncing": "Импортируется...",
       "title": "Внешние инструменты"
     },
-    "title": "Управление навыками"
+    "title": "Управление навыками",
+    "card": {
+      "scripts": "{count} scripts",
+      "env": "{count} env",
+      "pythonShort": "Py",
+      "nodeShort": "Node"
+    }
+  },
+  "environments": {
+    "title": "Окружения",
+    "description": "Просматривайте каталоги проектов, использованные вашими сессиями, быстро открывайте их или назначайте один каталог в качестве каталога по умолчанию для новых чатов.",
+    "default": {
+      "title": "Каталог по умолчанию",
+      "description": "В новых чатах этот каталог будет выбран заранее, если вы вручную не укажете другой.",
+      "empty": "Каталог по умолчанию не задан."
+    },
+    "history": {
+      "title": "История",
+      "description": "Здесь показываются только каталоги, которые действительно использовались сессиями."
+    },
+    "temp": {
+      "title": "Temp-каталоги",
+      "description": "Каталоги во временном корне или в рабочих каталогах, которыми управляет приложение, группируются здесь и скрыты по умолчанию."
+    },
+    "actions": {
+      "refresh": "Обновить",
+      "showMissing": "Показывать отсутствующие каталоги",
+      "open": "Открыть",
+      "setDefault": "Сделать по умолчанию",
+      "clearDefault": "Сбросить по умолчанию",
+      "showTemp": "Показать Temp",
+      "hideTemp": "Скрыть Temp"
+    },
+    "badges": {
+      "default": "По умолчанию",
+      "temp": "Temp",
+      "missing": "Отсутствует",
+      "notInHistory": "Нет в истории"
+    },
+    "meta": {
+      "sessions": "{count} сессий",
+      "lastUsed": "Последнее использование: {value}",
+      "never": "Никогда"
+    },
+    "empty": {
+      "regular": "Нет окружений для отображения.",
+      "temp": "Окружений Temp пока нет."
+    },
+    "errors": {
+      "openTitle": "Не удалось открыть каталог"
+    }
+  },
+  "remote": {
+    "title": "Удалённое управление",
+    "description": "Настройте удалённое управление через Telegram и Feishu в одном месте.",
+    "telegram": {
+      "title": "Telegram",
+      "description": "Управляйте одним ботом Telegram для удалённого управления и доставки хуков.",
+      "botToken": "Токен бота",
+      "botTokenPlaceholder": "Токен бота Telegram"
+    },
+    "remoteControl": {
+      "title": "Удалённое управление",
+      "description": "Привяжите каждую удалённую точку входа к одной сессии DeepChat и сохраняйте эту сессию между командами.",
+      "streamMode": "Режим стриминга",
+      "streamModeDraft": "Черновой стриминг",
+      "streamModeFinal": "Только финальный ответ",
+      "allowedUserIds": "Разрешённые ID пользователей",
+      "allowedUserIdsPlaceholder": "e.g. 123456789, 987654321",
+      "defaultAgent": "Агент DeepChat по умолчанию",
+      "defaultAgentPlaceholder": "Выберите агента",
+      "defaultWorkdir": "Каталог по умолчанию",
+      "defaultWorkdirPlaceholder": "Оставьте пустым, чтобы использовать глобальный каталог по умолчанию",
+      "defaultWorkdirHelper": "Используется, когда агентом по умолчанию является ACP. Оставьте пустым, чтобы использовать глобальный каталог по умолчанию.",
+      "openPairDialog": "Связать",
+      "manageBindings": "Управление привязками",
+      "pairCode": "Код привязки",
+      "noPairCode": "Нет активного кода привязки",
+      "generatePairCode": "Сгенерировать",
+      "clearPairCode": "Очистить",
+      "pairCodeExpiresAt": "Истекает в {time}",
+      "pairDialogTitle": "Связка Telegram",
+      "pairDialogDescription": "Сгенерируйте код привязки и завершите привязку в чате с вашим ботом Telegram.",
+      "pairDialogInstruction": "Отправьте эту команду соответствующему боту:",
+      "bindingsDialogTitle": "Привязанные сессии",
+      "bindingsDialogDescription": "Удаляйте привязки Telegram к сессиям по одной.",
+      "bindingsEmpty": "Пока нет привязок Telegram.",
+      "pairingSuccessTitle": "Привязка завершена",
+      "pairingSuccessDescription": "Список разрешённых ID пользователей обновлён.",
+      "clearBindings": "Очистить привязки",
+      "clearBindingsResult": "Очищено привязок: {count}.",
+      "pairDialogInstructionTelegram": "Отправьте эту команду боту Telegram:",
+      "pairDialogInstructionFeishu": "Отправьте эту команду боту Feishu в личном сообщении:"
+    },
+    "hooks": {
+      "title": "Telegram Hook уведомления",
+      "description": "Используйте того же бота Telegram для hook-уведомлений.",
+      "chatId": "ID чата",
+      "chatIdPlaceholder": "e.g. 123456789",
+      "threadId": "ID треда (необязательно)",
+      "threadIdPlaceholder": "Необязательный ID треда"
+    },
+    "status": {
+      "title": "Статус выполнения",
+      "botUser": "Пользователь бота: {username} ({id})",
+      "bindings": "Привязки: {count}, смещение опроса: {pollOffset}",
+      "states": {
+        "disabled": "Отключено",
+        "stopped": "Остановлено",
+        "starting": "Запускается",
+        "running": "Работает",
+        "backoff": "Повтор после сбоя",
+        "error": "Ошибка"
+      }
+    },
+    "feishu": {
+      "title": "Feishu",
+      "description": "Подключите бота Feishu для личных сообщений, групповых чатов и веток тем.",
+      "appId": "ID приложения",
+      "appIdPlaceholder": "ID приложения Feishu",
+      "appSecret": "Секрет приложения",
+      "appSecretPlaceholder": "Секрет приложения Feishu",
+      "verificationToken": "Токен проверки",
+      "verificationTokenPlaceholder": "Токен проверки Feishu",
+      "encryptKey": "Ключ шифрования (необязательно)",
+      "encryptKeyPlaceholder": "Оставьте пустым, если шифрование событий не включено",
+      "botUser": "Пользователь бота: {name} ({openId})",
+      "bindings": "Привязки: {count}, связанных пользователей: {pairedUserCount}",
+      "pairedUserOpenIds": "Open ID связанных пользователей",
+      "pairedUserOpenIdsPlaceholder": "например: ou_xxx, ou_yyy",
+      "accessRulesDescription": "Сначала выполните привязку в личном сообщении. В группах только связанные пользователи, которые упоминают бота через {'@'}, могут управлять сессией.",
+      "accessRule1": "Выполните привязку в личном сообщении командой /pair [код].",
+      "accessRule2": "В группах и темах бот реагирует только тогда, когда связанный пользователь упоминает его через {'@'}."
+    },
+    "sections": {
+      "credentials": "Учетные данные",
+      "remoteControl": "Удалённое управление",
+      "notifications": "Уведомления",
+      "accessRules": "Правила доступа"
+    },
+    "overview": {
+      "telegram": "{bindingCount} привязок, {pairedCount} связанных пользователей, hooks {hooks}",
+      "feishu": "{bindingCount} привязок, {pairedCount} связанных пользователей",
+      "hooksOn": "вкл.",
+      "hooksOff": "выкл."
+    },
+    "bindingKinds": {
+      "dm": "Личка",
+      "group": "Группа",
+      "topic": "Тема"
+    }
+  },
+  "deepchatAgents": {
+    "title": "Агенты DeepChat",
+    "description": "Управляйте агентами DeepChat и значениями по умолчанию, которые они применяют к новым сессиям.",
+    "builtIn": "Встроенный",
+    "editTitle": "Редактировать агент DeepChat",
+    "createTitle": "Создать агент DeepChat",
+    "unnamed": "Агент без имени",
+    "name": "Название",
+    "namePlaceholder": "Например: Писатель / Исследование / Перевод",
+    "enabledLabel": "Включен",
+    "descriptionLabel": "Описание",
+    "descriptionPlaceholder": "Необязательная заметка о назначении этого агента",
+    "avatarTitle": "Аватар",
+    "avatarDefault": "По умолчанию",
+    "avatarDefaultDesc": "DeepChat сохраняет встроенную иконку. Остальные агенты используют текстовый аватар.",
+    "avatarLucide": "Иконка Lucide",
+    "avatarLucideDesc": "Выберите иконку Lucide и задайте цвета для светлой и тёмной темы.",
+    "avatarMonogram": "Монограмма",
+    "avatarMonogramDesc": "Используйте две латинские буквы или первый символ CJK.",
+    "lucideIcon": "Имя иконки Lucide",
+    "lightColor": "Цвет для светлой темы",
+    "darkColor": "Цвет для тёмной темы",
+    "monogramText": "Монограмма",
+    "monogramPlaceholder": "Например: WR / 研",
+    "backgroundColor": "Цвет фона",
+    "modelsTitle": "Параметры модели по умолчанию",
+    "chatModel": "Модель чата по умолчанию",
+    "assistantModel": "Модель помощника",
+    "visionModel": "Визуальная модель",
+    "temperature": "Температура",
+    "contextLength": "Длина контекста",
+    "maxTokens": "Макс. токенов",
+    "thinkingBudget": "Бюджет мышления",
+    "reasoningEffort": "Уровень рассуждения",
+    "verbosity": "Степень подробности",
+    "interleaved": "Принудительная совместимость с чередующимся рассуждением",
+    "systemPrompt": "Системный промпт по умолчанию",
+    "systemPromptPlaceholder": "Оставьте пустым, чтобы использовать пустой системный промпт",
+    "defaultProjectPath": "Каталог по умолчанию (необязательно)",
+    "defaultProjectPathPlaceholder": "Оставьте пустым, чтобы использовать глобальный каталог по умолчанию",
+    "permissionMode": "Разрешения по умолчанию",
+    "permissionFullAccess": "Полный доступ",
+    "permissionDefault": "Стандартные разрешения",
+    "toolsTitle": "Встроенные инструменты",
+    "compactionTitle": "Автосжатие",
+    "compactionEnabled": "Включить автосжатие",
+    "compactionDescription": "Эти значения влияют только на будущие сессии DeepChat.",
+    "compactionThreshold": "Порог срабатывания",
+    "compactionRetainPairs": "Сохранять последние пары",
+    "deleteConfirm": "Удалить агента «{name}»? Его история будет возвращена встроенному агенту DeepChat.",
+    "subagentsTitle": "Субагенты",
+    "subagentsDescription": "Настройте переиспользуемые слоты дочерних сессий, доступные через `subagent_orchestrator`.",
+    "subagentsEnabled": "Включить субагентов",
+    "subagentTargetType": "Тип цели",
+    "subagentTargetSelf": "Этот агент",
+    "subagentTargetAgent": "Агент",
+    "subagentDisplayName": "Отображаемое имя",
+    "subagentDescription": "Описание слота",
+    "subagentTargetAgentLabel": "Целевой агент",
+    "subagentLimit": "{count}/{max} слотов",
+    "addSubagentSlot": "+ Добавить слот"
   }
 }

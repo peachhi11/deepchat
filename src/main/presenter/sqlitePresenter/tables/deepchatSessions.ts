@@ -11,6 +11,7 @@ type DeepChatSessionGenerationSettings = Pick<
   | 'thinkingBudget'
   | 'reasoningEffort'
   | 'verbosity'
+  | 'forceInterleavedThinkingCompat'
 >
 
 export interface DeepChatSessionRow {
@@ -25,6 +26,7 @@ export interface DeepChatSessionRow {
   thinking_budget: number | null
   reasoning_effort: 'minimal' | 'low' | 'medium' | 'high' | null
   verbosity: 'low' | 'medium' | 'high' | null
+  force_interleaved_thinking_compat: number | null
   summary_text: string | null
   summary_cursor_order_seq: number | null
   summary_updated_at: number | null
@@ -42,12 +44,52 @@ export class DeepChatSessionsTable extends BaseTable {
   }
 
   getCreateTableSQL(): string {
+    return this.getCreateTableSQLForVersion(0)
+  }
+
+  override createTable(): void {
+    if (this.tableExists()) {
+      return
+    }
+
+    this.db.exec(this.getCreateTableSQLForVersion(this.getRecordedSchemaVersion()))
+  }
+
+  private getCreateTableSQLForVersion(version: number): string {
+    const columns = [
+      'id TEXT PRIMARY KEY',
+      'provider_id TEXT NOT NULL',
+      'model_id TEXT NOT NULL',
+      "permission_mode TEXT NOT NULL DEFAULT 'full_access'"
+    ]
+
+    if (version >= 12) {
+      columns.push(
+        'system_prompt TEXT',
+        'temperature REAL',
+        'context_length INTEGER',
+        'max_tokens INTEGER',
+        'thinking_budget INTEGER',
+        'reasoning_effort TEXT',
+        'verbosity TEXT'
+      )
+    }
+
+    if (version >= 14) {
+      columns.push(
+        'summary_text TEXT',
+        'summary_cursor_order_seq INTEGER NOT NULL DEFAULT 1',
+        'summary_updated_at INTEGER'
+      )
+    }
+
+    if (version >= 19) {
+      columns.push('force_interleaved_thinking_compat INTEGER')
+    }
+
     return `
       CREATE TABLE IF NOT EXISTS deepchat_sessions (
-        id TEXT PRIMARY KEY,
-        provider_id TEXT NOT NULL,
-        model_id TEXT NOT NULL,
-        permission_mode TEXT NOT NULL DEFAULT 'full_access'
+        ${columns.join(',\n        ')}
       );
     `
   }
@@ -71,11 +113,16 @@ export class DeepChatSessionsTable extends BaseTable {
         ALTER TABLE deepchat_sessions ADD COLUMN summary_updated_at INTEGER;
       `
     }
+    if (version === 19) {
+      return `
+        ALTER TABLE deepchat_sessions ADD COLUMN force_interleaved_thinking_compat INTEGER;
+      `
+    }
     return null
   }
 
   getLatestVersion(): number {
-    return 14
+    return 19
   }
 
   create(
@@ -99,11 +146,12 @@ export class DeepChatSessionsTable extends BaseTable {
            thinking_budget,
            reasoning_effort,
            verbosity,
+           force_interleaved_thinking_compat,
            summary_text,
            summary_cursor_order_seq,
            summary_updated_at
          )
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         id,
@@ -117,6 +165,11 @@ export class DeepChatSessionsTable extends BaseTable {
         generationSettings?.thinkingBudget ?? null,
         generationSettings?.reasoningEffort ?? null,
         generationSettings?.verbosity ?? null,
+        generationSettings?.forceInterleavedThinkingCompat === undefined
+          ? null
+          : generationSettings.forceInterleavedThinkingCompat
+            ? 1
+            : 0,
         null,
         1,
         null
@@ -157,6 +210,9 @@ export class DeepChatSessionsTable extends BaseTable {
     }
     if (row.verbosity !== null) {
       settings.verbosity = row.verbosity
+    }
+    if (typeof row.force_interleaved_thinking_compat === 'number') {
+      settings.forceInterleavedThinkingCompat = row.force_interleaved_thinking_compat === 1
     }
 
     return settings
@@ -203,6 +259,16 @@ export class DeepChatSessionsTable extends BaseTable {
     if (Object.prototype.hasOwnProperty.call(settings, 'verbosity')) {
       updates.push('verbosity = ?')
       params.push(settings.verbosity ?? null)
+    }
+    if (Object.prototype.hasOwnProperty.call(settings, 'forceInterleavedThinkingCompat')) {
+      updates.push('force_interleaved_thinking_compat = ?')
+      params.push(
+        settings.forceInterleavedThinkingCompat === undefined
+          ? null
+          : settings.forceInterleavedThinkingCompat
+            ? 1
+            : 0
+      )
     }
 
     if (updates.length === 0) {

@@ -15,5 +15,9 @@
   "settings-mcp-market": "Mercado MCP",
   "settings-acp": "Proxy ACP",
   "settings-skills": "Skills",
-  "settings-notifications-hooks": "Notificações e hooks"
+  "settings-notifications-hooks": "Hooks",
+  "settings-dashboard": "Dashboard",
+  "settings-environments": "Ambientes",
+  "settings-remote": "Remoto",
+  "settings-deepchat-agents": "Agentes do DeepChat"
 }

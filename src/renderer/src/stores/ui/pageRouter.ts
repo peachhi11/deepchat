@@ -1,41 +1,33 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { usePresenter } from '@/composables/usePresenter'
-import { CONFIG_EVENTS } from '@/events'
 
-export type PageRoute =
-  | { name: 'welcome' }
-  | { name: 'newThread' }
-  | { name: 'chat'; sessionId: string }
+export type PageRoute = { name: 'newThread' } | { name: 'chat'; sessionId: string }
+type GoToNewThreadOptions = {
+  refresh?: boolean
+}
 
 export const usePageRouterStore = defineStore('pageRouter', () => {
-  const configPresenter = usePresenter('configPresenter')
-  const newAgentPresenter = usePresenter('newAgentPresenter')
+  const agentSessionPresenter = usePresenter('agentSessionPresenter')
 
   // --- State ---
   const route = ref<PageRoute>({ name: 'newThread' })
+  const newThreadRefreshKey = ref(0)
   const error = ref<string | null>(null)
 
   // --- Actions ---
 
   async function initialize(): Promise<void> {
     try {
-      // 1. Check if any provider is enabled
-      const enabledProviders = configPresenter.getEnabledProviders()
-      if (!enabledProviders || enabledProviders.length === 0) {
-        route.value = { name: 'welcome' }
-        return
-      }
-
-      // 2. Check for active new-agent session on this window content first
+      // 1. Check for the active agent session on this webContents first
       const webContentsId = window.api.getWebContentsId()
-      const activeNewSession = await newAgentPresenter.getActiveSession(webContentsId)
-      if (activeNewSession) {
-        route.value = { name: 'chat', sessionId: activeNewSession.id }
+      const activeAgentSession = await agentSessionPresenter.getActiveSession(webContentsId)
+      if (activeAgentSession) {
+        route.value = { name: 'chat', sessionId: activeAgentSession.id }
         return
       }
 
-      // 3. Default to new thread
+      // 2. Default to new thread
       route.value = { name: 'newThread' }
     } catch (e) {
       error.value = String(e)
@@ -43,12 +35,11 @@ export const usePageRouterStore = defineStore('pageRouter', () => {
     }
   }
 
-  function goToWelcome(): void {
-    route.value = { name: 'welcome' }
-  }
-
-  function goToNewThread(): void {
+  function goToNewThread(options: GoToNewThreadOptions = {}): void {
     route.value = { name: 'newThread' }
+    if (options.refresh) {
+      newThreadRefreshKey.value += 1
+    }
   }
 
   function goToChat(sessionId: string): void {
@@ -60,27 +51,11 @@ export const usePageRouterStore = defineStore('pageRouter', () => {
   const currentRoute = computed(() => route.value.name)
   const chatSessionId = computed(() => (route.value.name === 'chat' ? route.value.sessionId : null))
 
-  // --- Event Listeners ---
-
-  window.electron.ipcRenderer.on(CONFIG_EVENTS.PROVIDER_CHANGED, async () => {
-    try {
-      const enabledProviders = configPresenter.getEnabledProviders()
-      if (!enabledProviders || enabledProviders.length === 0) {
-        goToWelcome()
-      } else if (route.value.name === 'welcome') {
-        // Providers became available, go to new thread
-        goToNewThread()
-      }
-    } catch (e) {
-      error.value = String(e)
-    }
-  })
-
   return {
     route,
+    newThreadRefreshKey,
     error,
     initialize,
-    goToWelcome,
     goToNewThread,
     goToChat,
     currentRoute,

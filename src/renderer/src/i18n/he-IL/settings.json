@@ -61,12 +61,23 @@
     "fileMaxSizeHint": "מגביל את הגודל המקסימלי של קובץ בודד המועלה",
     "defaultModel": {
       "title": "מודל ברירת מחדל",
-      "chatModel": "מודל צ'אט ברירת מחדל",
-      "visionModel": "מודל ראייה ברירת מחדל"
+      "chatModel": "מודל צ'אט ברירת מחדל"
+    },
+    "autoCompaction": {
+      "title": "דחיסה אוטומטית",
+      "enabled": "הפעלת דחיסה אוטומטית",
+      "description": "כאשר שיחה מתקרבת למגבלת חלון ההקשר של המודל, DeepChat יכול לדחוס אוטומטית היסטוריה ישנה יותר כדי שהשיחה תוכל להימשך. אם האפשרות כבויה, היסטוריה שחורגת מהתקציב תוסר ישירות במקום להיות מתומצתת.",
+      "thresholdLabel": "סף הפעלה",
+      "thresholdMin": "מוקדם ({value}%)",
+      "thresholdMax": "מאוחר ({value}%)",
+      "thresholdDescription": "להתחיל דחיסה כאשר השימוש בפרומפט מגיע לחלק הזה מתקציב ההיסטוריה האפקטיבי. ערכים נמוכים משאירים יותר מרווח; ערכים גבוהים שומרים יותר מההקשר הגולמי.",
+      "retainPairsLabel": "שמירת זוגות ההודעות האחרונות",
+      "retainPairsValue": "{count} זוגות",
+      "retainPairsDescription": "לשמור מחוץ לדחיסה את זוגות המשתמש והעוזר האחרונים שהושלמו. השאילתה הנוכחית לא נכללת."
     }
   },
   "notificationsHooks": {
-    "title": "התראות ו‑Hooks",
+    "title": "Hooks",
     "description": "הגדרת התראות webhook ו‑hooks של מחזור החיים.",
     "events": {
       "title": "אירועים",
@@ -160,6 +171,18 @@
       "backupSuccessTitle": "גיבוי הושלם בהצלחה",
       "backupSuccessMessage": "הנתונים גובו בהצלחה"
     },
+    "modelConfigUpdate": {
+      "title": "עדכון הגדרות המודלים",
+      "description": "מרענן בכפייה את provider.json מהמקור כדי לעדכן יכולות מודל והגדרות ברירת מחדל.",
+      "button": "עדכן עכשיו",
+      "updating": "מעדכן...",
+      "updatedTitle": "הגדרות המודלים עודכנו",
+      "updatedDescription": "מטא־הנתונים העדכניים של הספקים נטענו בהצלחה.",
+      "upToDateTitle": "כבר מעודכן",
+      "upToDateDescription": "הגדרות המודלים המקומיות כבר משתמשות במטא־הנתונים העדכניים ביותר של הספקים.",
+      "failedTitle": "העדכון נכשל",
+      "failedDescription": "כרגע אי אפשר לעדכן את הגדרות המודלים. נסה שוב מאוחר יותר."
+    },
     "yoBrowser": {
       "clearButton": "נקה את נתוני YoBrowser",
       "clearFailedDescription": "אנא נסה שוב או בדוק את היומנים לקבלת מידע נוסף.",
@@ -173,6 +196,109 @@
       "description": "ארגז חול עצמאי של דפדפן שאינו חולק עוגיות ואחסון מקומי עם האפליקציה הראשית. ניתן לנקות את נתוני YoBrowser בלחיצה אחת כאן.",
       "title": "ארגז חול של YoBrowser"
     }
+  },
+  "dashboard": {
+    "badge": "לוח שימוש",
+    "title": "לוח שימוש",
+    "description": "מציג שימוש בטוקנים, פגיעות מטמון ועלות משוערת. נתוני הטוקנים והעלות מוערכים על סמך מידע ציבורי, וחלק מהספקים או מההודעות המוקדמות יותר עשויים להיות חסרים, לכן יש להתייחס לנתונים כהערכה בלבד.",
+    "actions": {
+      "refresh": "רענון"
+    },
+    "backfill": {
+      "runningTitle": "מעדכן נתוני שימוש",
+      "runningDescription": "נתוני השימוש עדיין מתעדכנים ברקע. אפשר כבר לעיין בתוצאות הנוכחיות.",
+      "failedTitle": "עדכון נתוני השימוש נכשל",
+      "failedDescription": "רענן את הדף הזה או נסה שוב מאוחר יותר."
+    },
+    "error": {
+      "title": "טעינת לוח השימוש נכשלה",
+      "description": "נסה שוב מאוחר יותר."
+    },
+    "empty": {
+      "title": "עדיין אין נתוני שימוש",
+      "description": "שימוש בטוקנים, פגיעות מטמון ועלות משוערת יוצגו כאן ברגע שנתוני השימוש יהיו זמינים.",
+      "historyNote": "נתוני הטוקנים והעלות מוערכים על סמך מידע ציבורי. חלק מהספקים או מההודעות המוקדמות יותר עשויים להיות חסרים, לכן יש להתייחס לנתונים כהערכה בלבד."
+    },
+    "summary": {
+      "totalTokens": "סך כל הטוקנים",
+      "totalTokensDescription": "מציג את החלוקה של טוקני הקלט והפלט מתוך הסך הכולל.",
+      "inputTokensLabel": "קלט",
+      "outputTokensLabel": "פלט",
+      "cachedTokens": "טוקנים מהמטמון",
+      "cachedTokensDescription": "טוקני פרומפט שסופקו ממטמון הספק.",
+      "cachedTokensCachedLabel": "במטמון",
+      "cachedTokensUncachedLabel": "ללא מטמון",
+      "cacheHitRate": "שיעור פגיעות מטמון",
+      "cacheHitRateDescription": "טוקני פרומפט מהמטמון חלקי כלל טוקני הקלט.",
+      "estimatedCost": "עלות משוערת",
+      "estimatedCostDescription": "עלות משוערת בדולרים לפי תמחור הספק או תמחור הגיבוי של AIHubMix.",
+      "estimatedCostTrendLabel": "מגמה ב־30 הימים האחרונים",
+      "estimatedCostTrendEmpty": "לא נרשמה עלות ב־30 הימים האחרונים.",
+      "recordingStartedAt": "תחילת הרישום",
+      "recordingStartedAtDescription": "רשומת השימוש המוקדמת ביותר השמורה כעת בלוח זה.",
+      "withDeepChatDaysLabel": "ימים יחד",
+      "withDeepChatDaysValue": "{days} ימים",
+      "withDeepChatDaysSentence": "זה היום ה־{days} שלך עם DeepChat.",
+      "withDeepChatDaysDescription": "מבוסס על רשומת השימוש המוקדמת ביותר שלך מ־{date}.",
+      "withDeepChatDaysDescriptionUnavailable": "עדיין אין רשומות שימוש.",
+      "tokenUsage": "שימוש בטוקנים",
+      "nostalgiaLabel": "זיכרונות",
+      "nostalgiaDaysValue": "{days} ימים",
+      "nostalgiaSessionsValue": "{count} שיחות",
+      "nostalgiaMessagesValue": "{count} הודעות",
+      "nostalgiaDaysDetailLabel": "הזמן יחד",
+      "nostalgiaDaysDetail": "אתם ו-DeepChat כבר {days} ימים יחד.",
+      "nostalgiaSessionsDetailLabel": "שיחות",
+      "nostalgiaSessionsDetail": "קיימתם יחד {count} שיחות.",
+      "nostalgiaMessagesDetailLabel": "הודעות",
+      "nostalgiaMessagesDetail": "החלפתם {count} הודעות.",
+      "nostalgiaMostActiveDayLabel": "היום הפעיל ביותר",
+      "nostalgiaMostActiveDayDetail": "{date} היה היום הפעיל ביותר שלך, עם {count} הודעות."
+    },
+    "calendar": {
+      "title": "לוח תרומות",
+      "description": "צריכת טוקנים יומית ב־365 הימים האחרונים.",
+      "legend": "מפחות ליותר",
+      "tooltip": "{date}: {tokens} טוקנים"
+    },
+    "breakdown": {
+      "providerTitle": "דירוג ספקים",
+      "providerDescription": "מדורג קודם לפי עלות משוערת ולאחר מכן לפי סך הטוקנים.",
+      "modelTitle": "דירוג מודלים",
+      "modelDescription": "10 המודלים המובילים לפי עלות משוערת ולאחר מכן לפי סך הטוקנים.",
+      "messages": "{count} הודעות",
+      "empty": "עדיין אין נתוני פירוט להצגה."
+    },
+    "rtk": {
+      "title": "חיסכון RTK",
+      "description": "הערכה של מספר הטוקנים ש-RTK מנע מלהגיע להקשר המודל במהלך הרצת הפקודות המובנות של DeepChat.",
+      "actions": {
+        "retry": "נסה שוב"
+      },
+      "status": {
+        "disabled": "מושבת",
+        "checking": "בודק",
+        "healthy": "תקין",
+        "unhealthy": "לא זמין"
+      },
+      "descriptionDisabled": "RTK כבוי עבור סשן היישום הזה, ולכן הפקודות רצות במסלול הביצוע הרגיל.",
+      "descriptionChecking": "DeepChat בודק אם RTK יכול לפעול כראוי בסביבה הנוכחית.",
+      "descriptionHealthy": "RTK פעיל עבור הרצת הפקודות המובנות של DeepChat.",
+      "descriptionUnhealthy": "בדיקת התקינות של RTK בעת ההפעלה נכשלה, והוא הושבת עבור סשן היישום הזה.",
+      "sourceLabel": "מקור סביבת הריצה: {source}",
+      "source": {
+        "bundled": "מובנה",
+        "system": "מערכת",
+        "none": "לא זמין"
+      },
+      "summary": {
+        "savedTokens": "טוקנים שנחסכו",
+        "commands": "פקודות שנרשמו",
+        "avgSavingsPct": "חיסכון ממוצע",
+        "outputTokens": "פלט מסונן"
+      }
+    },
+    "unavailable": "לא זמין"
   },
   "model": {
     "title": "הגדרות מודל",
@@ -203,6 +329,11 @@
     "provider": "ספק שירות",
     "providerSetting": "הגדרות ספק שירות",
     "selectModel": "בחר מודל",
+    "form": {
+      "id": {
+        "label": "מזהה"
+      }
+    },
     "modelConfig": {
       "cancel": "ביטול",
       "contextLength": {
@@ -238,6 +369,10 @@
       "reasoning": {
         "description": "האם המודל תומך ביכולת חשיבה (Reasoning)?",
         "label": "יכולת חשיבה"
+      },
+      "interleavedThinking": {
+        "label": "Interleaved Thinking",
+        "description": "קובע אם המודל הזה יעבד הודעות reasoning ו-tool-call באמצעות Interleaved Thinking. ברירות המחדל של הספק מוחלות אוטומטית."
       },
       "thinkingBudget": {
         "label": "תקציב חשיבה",
@@ -317,6 +452,19 @@
           "chat": "יצירת טקסט",
           "image": "יצירת תמונות"
         }
+      },
+      "endpointType": {
+        "label": "סוג נקודת קצה",
+        "description": "בחר באיזה פרוטוקול upstream ישתמש New API עבור מודל זה.",
+        "placeholder": "בחר סוג נקודת קצה",
+        "required": "סוג נקודת קצה נדרש",
+        "options": {
+          "openai": "OpenAI Chat",
+          "openai-response": "OpenAI Responses",
+          "anthropic": "Anthropic Messages",
+          "gemini": "Gemini Native",
+          "image-generation": "יצירת תמונות"
+        }
       }
     }
   },
@@ -349,6 +497,9 @@
     "urlFormat": "דוגמת API: {defaultUrl}",
     "urlFormatFill": "מילוי בכתובת ה-API",
     "openaiResponsesNotice": "OpenAI משתמשת כברירת מחדל ב-Responses API. אם endpoint של צד שלישי תומך רק ב-Chat Completions, השתמש בספק OpenAI Completions.",
+    "modifyBaseUrl": "ערוך",
+    "baseUrlLockedHint": "הספק הזה נעול לכתובת הבסיס המומלצת כדי לצמצם שגיאות תצורה.",
+    "refreshModelsWithMetadataHint": "רענון הספק הזה יסנכרן קודם את המטא־דאטה במעלה הזרם ולאחר מכן יבנה מחדש את רשימת המודלים המקומית.",
     "modelList": "רשימת מודלים",
     "enableModels": "הפעל מודלים",
     "disableAllModels": "השבת את כל המודלים",
@@ -434,6 +585,20 @@
         "baseUrlPlaceholder": "אנא הזן את כתובת הבסיס ל-API",
         "enable": "הפעל ספק"
       },
+      "providerDeeplinkImport": {
+        "title": "ייבוא ספק",
+        "description": "בדוק את תצורת הספק שפוענחה לפני החלתה.",
+        "type": "סוג",
+        "url": "כתובת URL",
+        "key": "מפתח",
+        "overwriteWarning": "ייבוא זה ידרוס את תצורת הספק הנוכחית.",
+        "confirming": "מייבא..."
+      },
+      "baseUrlUnlock": {
+        "title": "אישור שינוי כתובת הבסיס",
+        "description": "לא מומלץ לשנות את כתובת הבסיס של הספק הזה. נקודת קצה שגויה עלולה לגרום לכשלי בקשות או להתנהגות בלתי צפויה אחרת. אפשר עדיין להמשיך אם מבינים את הסיכון.",
+        "confirm": "המשך"
+      },
       "deleteProvider": {
         "title": "אשר מחיקת ספק",
         "content": "האם אתה בטוח שברצונך למחוק את הספק \"{name}\"? לא ניתן לבטל פעולה זו.",
@@ -508,7 +673,13 @@
       "backupSuccessTitle": "הגיבוי הושלם",
       "backupSuccessMessage": "הגיבוי נשמר ב-{time} ({size})",
       "importSuccessTitle": "הייבוא הושלם",
-      "importSuccessMessage": "יובאו בהצלחה {count} שיחות"
+      "importSuccessMessage": "יובאו בהצלחה {count} שיחות",
+      "refreshModelsSuccessTitle": "המודלים רועננו",
+      "refreshModelsSuccessDescription": "רשימת המודלים העדכנית סונכרנה עבור הספק הזה.",
+      "refreshModelsSuccessDescriptionWithMetadata": "המטא־דאטה במעלה הזרם ורשימת המודלים העדכנית סונכרנו עבור הספק הזה.",
+      "refreshModelsFailedTitle": "הרענון נכשל",
+      "refreshModelsFailedDescription": "לא ניתן לרענן כעת את המודלים של הספק הזה. נסה שוב מאוחר יותר.",
+      "refreshModelsFailedDescriptionWithMetadata": "לא ניתן לסנכרן כעת את המטא־דאטה במעלה הזרם ואת המודלים של הספק הזה. נסה שוב מאוחר יותר."
     },
     "modelscope": {
       "mcpSync": {
@@ -562,30 +733,8 @@
       "verifyFailed": "האימות נכשל",
       "verifySuccess": "האימות הצליח"
     },
-    "anthropicApiKeyTip": "אנא עבור למסוף Anthropic כדי לקבל את מפתח ה-API שלך",
-    "anthropicConnected": "Anthropic מחובר",
-    "anthropicNotConnected": "Anthropic אינו מחובר",
-    "anthropicOAuthTip": "לחץ כדי לאשר ל-DeepChat לגשת לחשבון Anthropic שלך",
-    "oauthLogin": "התחברות OAuth",
-    "authMethod": "שיטת אימות",
-    "authMethodPlaceholder": "בחר שיטת אימות",
     "apiKeyLabel": "מפתח API",
     "apiUrlLabel": "כתובת API",
-    "anthropicOAuthFlowTip": "המערכת תפתח אוטומטית את חלון האישור. אנא חזור והזן את קוד האישור לאחר האישור.",
-    "anthropicBrowserOpened": "הדפדפן החיצוני פתוח",
-    "anthropicCodeInstruction": "אנא השלם את האישור בדפדפן החיצוני והדבק את קוד האישור שהתקבל בתיבת הקלט למטה",
-    "browserOpenedSuccess": "הדפדפן החיצוני נפתח, אנא השלם את האישור",
-    "codeRequired": "אנא הזן את קוד האישור",
-    "inputOAuthCode": "הזן את קוד האישור",
-    "codeExchangeFailed": "החלפת קוד האישור נכשלה",
-    "invalidCode": "קוד אישור לא חוקי",
-    "oauthCodeHint": "אנא הדבק את קוד האישור כאן לאחר השלמת האישור בדפדפן חיצוני",
-    "oauthCodePlaceholder": "אנא הזן את קוד האישור...",
-    "verifyConnection": "אמת חיבור",
-    "manageModels": "נהל מודלים",
-    "anthropicOAuthActiveTip": "אימות OAuth מופעל, ניתן להשתמש בשירותי Anthropic ישירות",
-    "oauthVerifySuccess": "חיבור OAuth אומת בהצלחה",
-    "oauthVerifyFailed": "אימות חיבור OAuth נכשל",
     "configurationSaved": "התצורה נשמרה",
     "configurationUpdated": "התצורה עודכנה",
     "dataRefreshed": "הנתונים רועננו",
@@ -934,12 +1083,15 @@
     "goSettings": "פתח הגדרות",
     "hideWindow": "הסתר חלון",
     "quitApp": "צא מהאפליקציה",
+    "toggleSidebar": "הצג/הסתר סרגל צד",
+    "toggleWorkspace": "הצג/הסתר סביבת עבודה",
     "zoomIn": "הגדל תצוגה ",
     "zoomOut": "הקטן תצוגה ",
     "zoomReset": "אפס תצוגה",
     "newWindow": "פתח חלון חדש",
     "showHideWindow": "הצג/הסתר חלון",
     "newConversation": "שיחה חדשה",
+    "quickSearch": "חיפוש Spotlight",
     "closeWindow": "סגור את הכרטיסייה הנוכחית"
   },
   "acp": {
@@ -1075,11 +1227,57 @@
       "send": "שלח בקשה",
       "sending": "שְׁלִיחָה...",
       "title": "איתור באגים של ACP",
-      "workdirPlaceholder": "השאר ריק כדי להשתמש בספריית העבודה המוגדרת כברירת מחדל"
+      "workdirPlaceholder": "השאר ריק כדי להשתמש בספריית העבודה המוגדרת כברירת מחדל",
+      "healthCheck": "בדיקת תקינות",
+      "healthChecking": "בודק...",
+      "healthCheckFailed": "בדיקת התקינות נכשלה"
     },
     "mcpAccessBadge": "MCP {count}",
     "mcpAccessEmpty": "כרגע אין MCP אופציונלי.",
-    "mcpAccessTitle": "MCPs זמינים"
+    "mcpAccessTitle": "MCPs זמינים",
+    "registryCount": "{count} סוכנים",
+    "registryEmpty": "אין סוכני Registry זמינים לפי המסננים הנוכחיים.",
+    "registryRefresh": "רענון Registry",
+    "registryRepair": "תיקון",
+    "registrySearchPlaceholder": "חיפוש סוכני ACP Registry...",
+    "filters": {
+      "all": "כל המצבים",
+      "enabled": "מופעלים בלבד",
+      "installed": "מותקנים בלבד",
+      "attention": "דורשים טיפול"
+    },
+    "envOverrideTitle": "דריסת משתני סביבה",
+    "envOverridePlaceholder": "שורה אחת לכל KEY=VALUE",
+    "installState": {
+      "installed": "מותקן",
+      "installing": "בהתקנה",
+      "error": "ההתקנה נכשלה",
+      "notInstalled": "לא מותקן"
+    },
+    "registryInstallEntry": "התקנת Agent",
+    "registryInstallEntryDescription": "חפש והתקן סוכנים מ-ACP Registry, ואז חזור לכאן כדי להפעיל ולהגדיר אותם.",
+    "sharedMcpTitle": "MCP משותף",
+    "sharedMcpDescription": "כל סוכני ACP חולקים את אותה בחירת גישה ל-MCP.",
+    "installedSectionTitle": "סוכנים מותקנים",
+    "installedSectionDescription": "רק סוכני Registry מותקנים יופיעו כאן להפעלה, בדיקה ודריסת משתני סביבה.",
+    "installedCount": "{count} מותקנים",
+    "installedEmptyTitle": "עדיין אין סוכני Registry מותקנים",
+    "installedEmptyDescription": "התקן תחילה סוכן מ-ACP Registry, ואז הגדר אותו כאן.",
+    "registryOverlayEmpty": "אין סוכנים שתואמים למסננים הנוכחיים.",
+    "registryInstallAction": "התקן",
+    "registryUninstallAction": "הסר התקנה",
+    "registryUninstallConfirm": "להסיר את ההתקנה של הסוכן \"{name}\"?",
+    "registryUninstallDescription": "DeepChat ישבית את הסוכן הזה, וכשיש צורך גם ינקה נתוני התקנה שמנוהלים מקומית. אפשר להתקין אותו שוב מאוחר יותר דרך ACP Registry.",
+    "registryUninstallFailed": "הסרת ההתקנה של הסוכן נכשלה",
+    "registryInstallTitle": "ACP Registry",
+    "registryInstallDescription": "חיפוש, סינון והתקנה של סוכני ACP. לאחר ההתקנה חזור להגדרות כדי להגדיר אותם.",
+    "registryLearnMore": "מידע נוסף",
+    "registryRepository": "מאגר",
+    "installFilters": {
+      "all": "הכול",
+      "installed": "מותקנים",
+      "notInstalled": "לא מותקנים"
+    }
   },
   "rateLimit": {
     "title": "מגבלת קצב (Rate Limit)",
@@ -1109,6 +1307,10 @@
   },
   "skills": {
     "addSkill": "הוסף skill",
+    "draftSuggestions": {
+      "title": "הצע טיוטות מיומנות",
+      "description": "לאחר השלמת משימה, אפשר ל-Agent להציע טיוטות זמניות וניתנות לשימוש חוזר של מיומנויות. הטיוטות יישארו בתיקייה זמנית עד שתבחר לייבא אותן ידנית."
+    },
     "conflict": {
       "description": "הכישור בשם \"{name}\" כבר קיים. האם ברצונך לדרוס?",
       "overwrite": "כיסוי",
@@ -1136,10 +1338,27 @@
       "nameHint": "לאחר יצירת הכישור, השם אינו ניתן לשינוי",
       "namePlaceholder": "שם כישור",
       "noFiles": "אין קובץ",
-      "placeholder": "ערוך כאן את תוכן ה-skill...",
+      "placeholder": "ערוך כאן את תוכן הכישור...",
       "readFailed": "קריאה נכשלה",
       "success": "נשמר בהצלחה",
-      "title": "ערוך כישור"
+      "title": "ערוך כישור",
+      "runtimeTitle": "זמן ריצה",
+      "runtimeHint": "בחר כיצד סקריפטים מצורפים יאתרו את זמני הריצה של Python ו-Node.",
+      "pythonRuntime": "זמן ריצה של Python",
+      "nodeRuntime": "זמן ריצה של Node",
+      "envTitle": "משתני סביבה",
+      "envWarning": "הערכים מוסתרים רק בממשק המשתמש; הם נשמרים כטקסט רגיל בקובץ ה-sidecar של הכישור.",
+      "scriptsTitle": "סקריפטים מצורפים",
+      "scriptsHint": "רק סקריפטים תחת scripts/ ניתנים להרצה דרך skill_run.",
+      "noScripts": "לא זוהו סקריפטים ניתנים להרצה",
+      "scriptEnabled": "מופעל",
+      "scriptDescription": "דריסת תיאור",
+      "scriptDescriptionPlaceholder": "תיאור אופציונלי שיוצג לסוכן",
+      "runtime": {
+        "auto": "גיבוי אוטומטי",
+        "system": "זמן ריצה מערכת",
+        "builtin": "זמן ריצה מובנה"
+      }
     },
     "empty": "אין כישורים",
     "emptyHint": "לחץ על כפתור „הוסף skill“ להתקנת skill חדש",
@@ -1256,6 +1475,218 @@
       "syncing": "מייבא...",
       "title": "כלים חיצוניים"
     },
-    "title": "ניהול כישורים"
+    "title": "ניהול כישורים",
+    "card": {
+      "scripts": "{count} סקריפטים",
+      "env": "{count} משתני סביבה",
+      "pythonShort": "פייתון",
+      "nodeShort": "Node"
+    }
+  },
+  "environments": {
+    "title": "סביבות",
+    "description": "עיין בתיקיות הפרויקט שבהן השתמשו הסשנים שלך, פתח אותן במהירות או הגדר אחת כברירת מחדל לשיחות חדשות.",
+    "default": {
+      "title": "תיקיית ברירת מחדל",
+      "description": "שיחות חדשות יבחרו מראש תיקייה זו, אלא אם תבחר ידנית תיקייה אחרת.",
+      "empty": "לא הוגדרה תיקיית ברירת מחדל."
+    },
+    "history": {
+      "title": "היסטוריה",
+      "description": "כאן מוצגות רק תיקיות שבאמת שימשו סשנים."
+    },
+    "temp": {
+      "title": "תיקיות Temp",
+      "description": "תיקיות תחת שורש זמני או מרחבי עבודה שמנוהלים על ידי האפליקציה מקובצות כאן ומוסתרות כברירת מחדל."
+    },
+    "actions": {
+      "refresh": "רענון",
+      "showMissing": "הצג תיקיות חסרות",
+      "open": "פתח",
+      "setDefault": "הגדר כברירת מחדל",
+      "clearDefault": "נקה ברירת מחדל",
+      "showTemp": "הצג Temp",
+      "hideTemp": "הסתר Temp"
+    },
+    "badges": {
+      "default": "ברירת מחדל",
+      "temp": "Temp",
+      "missing": "חסר",
+      "notInHistory": "לא בהיסטוריה"
+    },
+    "meta": {
+      "sessions": "{count} סשנים",
+      "lastUsed": "שימוש אחרון: {value}",
+      "never": "מעולם"
+    },
+    "empty": {
+      "regular": "אין סביבות להצגה.",
+      "temp": "עדיין אין סביבות Temp."
+    },
+    "errors": {
+      "openTitle": "פתיחת התיקייה נכשלה"
+    }
+  },
+  "remote": {
+    "title": "שליטה מרחוק",
+    "description": "הגדר שליטה מרחוק ב-Telegram וב-Feishu במקום אחד.",
+    "telegram": {
+      "title": "Telegram",
+      "description": "נהל בוט Telegram אחד עבור שליטה מרחוק ושליחת Hooks.",
+      "botToken": "טוקן בוט",
+      "botTokenPlaceholder": "טוקן בוט Telegram"
+    },
+    "remoteControl": {
+      "title": "שליטה מרחוק",
+      "description": "קשרו כל יעד מרוחק לסשן DeepChat אחד ושמרו על אותו סשן בין פקודות.",
+      "streamMode": "מצב סטרימינג",
+      "streamModeDraft": "סטרימינג טיוטה",
+      "streamModeFinal": "תשובה סופית בלבד",
+      "allowedUserIds": "מזהי משתמש מורשים",
+      "allowedUserIdsPlaceholder": "e.g. 123456789, 987654321",
+      "defaultAgent": "סוכן DeepChat ברירת מחדל",
+      "defaultAgentPlaceholder": "בחר סוכן",
+      "defaultWorkdir": "תיקיית ברירת מחדל",
+      "defaultWorkdirPlaceholder": "השאר ריק כדי להשתמש בתיקיית ברירת המחדל הגלובלית",
+      "defaultWorkdirHelper": "משמש כאשר הסוכן ברירת המחדל הוא ACP. השאר ריק כדי לחזור לתיקיית ברירת המחדל הגלובלית.",
+      "openPairDialog": "צימוד",
+      "manageBindings": "ניהול קישורים",
+      "pairCode": "קוד צימוד",
+      "noPairCode": "אין קוד צימוד פעיל",
+      "generatePairCode": "צור",
+      "clearPairCode": "נקה",
+      "pairCodeExpiresAt": "פג תוקף ב-{time}",
+      "pairDialogTitle": "צימוד Telegram",
+      "pairDialogDescription": "צור קוד צימוד והשלם את הצימוד מתוך הצ'אט עם בוט ה-Telegram שלך.",
+      "pairDialogInstruction": "שלח את הפקודה הזו לבוט המתאים:",
+      "bindingsDialogTitle": "סשנים מקושרים",
+      "bindingsDialogDescription": "הסר קישורי סשן של Telegram אחד-אחד.",
+      "bindingsEmpty": "עדיין אין קישורי Telegram.",
+      "pairingSuccessTitle": "הצימוד הושלם",
+      "pairingSuccessDescription": "רשימת מזהי המשתמש המורשים רועננה.",
+      "clearBindings": "נקה קישורים",
+      "clearBindingsResult": "{count} קישור(ים) נוקו.",
+      "pairDialogInstructionTelegram": "שלחו את הפקודה הזו לבוט Telegram:",
+      "pairDialogInstructionFeishu": "שלחו את הפקודה הזו לבוט Feishu בהודעה פרטית:"
+    },
+    "hooks": {
+      "title": "Hooks של Telegram",
+      "description": "השתמש שוב באותו בוט Telegram עבור התראות Hook.",
+      "chatId": "מזהה צ'אט",
+      "chatIdPlaceholder": "e.g. 123456789",
+      "threadId": "מזהה שרשור (אופציונלי)",
+      "threadIdPlaceholder": "מזהה שרשור אופציונלי"
+    },
+    "status": {
+      "title": "מצב ריצה",
+      "botUser": "משתמש הבוט: {username} ({id})",
+      "bindings": "קישורים: {count}, היסט סקר: {pollOffset}",
+      "states": {
+        "disabled": "מושבת",
+        "stopped": "נעצר",
+        "starting": "מתחיל",
+        "running": "פועל",
+        "backoff": "מנסה שוב לאחר כשל",
+        "error": "שגיאה"
+      }
+    },
+    "feishu": {
+      "title": "Feishu",
+      "description": "חבר בוט Feishu להודעות פרטיות, שיחות קבוצתיות ושרשורי נושאים.",
+      "appId": "מזהה יישום",
+      "appIdPlaceholder": "מזהה יישום של Feishu",
+      "appSecret": "סוד היישום",
+      "appSecretPlaceholder": "סוד היישום של Feishu",
+      "verificationToken": "אסימון אימות",
+      "verificationTokenPlaceholder": "אסימון האימות של Feishu",
+      "encryptKey": "מפתח הצפנה (אופציונלי)",
+      "encryptKeyPlaceholder": "השאר ריק אם הצפנת אירועים לא מופעלת",
+      "botUser": "משתמש הבוט: {name} ({openId})",
+      "bindings": "קישורים: {count}, משתמשים מצומדים: {pairedUserCount}",
+      "pairedUserOpenIds": "Open ID של משתמשים מצומדים",
+      "pairedUserOpenIdsPlaceholder": "למשל ou_xxx, ou_yyy",
+      "accessRulesDescription": "צריך לבצע צימוד קודם בהודעה פרטית. בקבוצות, רק משתמשים מצומדים שמזכירים את הבוט עם {'@'} יכולים לשלוט בסשן.",
+      "accessRule1": "בצעו צימוד בהודעה פרטית עם /pair [קוד].",
+      "accessRule2": "בקבוצות ובנושאים, הבוט מגיב רק כאשר משתמש מצומד מזכיר אותו עם {'@'}."
+    },
+    "sections": {
+      "credentials": "אישורים",
+      "remoteControl": "שליטה מרחוק",
+      "notifications": "התראות",
+      "accessRules": "כללי גישה"
+    },
+    "overview": {
+      "telegram": "{bindingCount} קישורים, {pairedCount} משתמשים מצומדים, hooks {hooks}",
+      "feishu": "{bindingCount} קישורים, {pairedCount} משתמשים מצומדים",
+      "hooksOn": "מופעלים",
+      "hooksOff": "כבויים"
+    },
+    "bindingKinds": {
+      "dm": "הודעה פרטית",
+      "group": "קבוצה",
+      "topic": "נושא"
+    }
+  },
+  "deepchatAgents": {
+    "title": "סוכני DeepChat",
+    "description": "נהלו את סוכני DeepChat ואת הברירות שהם מחילים על שיחות חדשות.",
+    "builtIn": "מובנה",
+    "editTitle": "עריכת סוכן DeepChat",
+    "createTitle": "יצירת סוכן DeepChat",
+    "unnamed": "סוכן ללא שם",
+    "name": "שם",
+    "namePlaceholder": "לדוגמה: כתיבה / מחקר / תרגום",
+    "enabledLabel": "פעיל",
+    "descriptionLabel": "תיאור",
+    "descriptionPlaceholder": "הערה אופציונלית על מטרת הסוכן",
+    "avatarTitle": "אווטאר",
+    "avatarDefault": "ברירת מחדל",
+    "avatarDefaultDesc": "DeepChat שומר על הסמל המובנה. סוכנים אחרים משתמשים באווטאר טקסטואלי.",
+    "avatarLucide": "סמל Lucide",
+    "avatarLucideDesc": "בחרו סמל מתוך Lucide והגדירו צבעים למצב בהיר/כהה.",
+    "avatarMonogram": "מונוגרמה",
+    "avatarMonogramDesc": "השתמשו בשתי אותיות לטיניות או בתו הראשון בשפות סיניות/יפניות/קוריאניות.",
+    "lucideIcon": "שם סמל Lucide",
+    "lightColor": "צבע בהיר",
+    "darkColor": "צבע כהה",
+    "monogramText": "מונוגרמה",
+    "monogramPlaceholder": "לדוגמה: WR / 研",
+    "backgroundColor": "צבע רקע",
+    "modelsTitle": "ברירות מחדל למודל",
+    "chatModel": "מודל שיחה ברירת מחדל",
+    "assistantModel": "מודל עוזר",
+    "visionModel": "מודל ראייה",
+    "temperature": "טמפרטורה",
+    "contextLength": "אורך הקשר",
+    "maxTokens": "מספר טוקנים מרבי",
+    "thinkingBudget": "תקציב חשיבה",
+    "reasoningEffort": "רמת נימוק",
+    "verbosity": "רמת פירוט",
+    "interleaved": "כפיית תאימות לחשיבה משולבת",
+    "systemPrompt": "הנחיית מערכת ברירת מחדל",
+    "systemPromptPlaceholder": "השאירו ריק כדי להשתמש בהנחיית מערכת ריקה",
+    "defaultProjectPath": "תיקיית ברירת מחדל (אופציונלי)",
+    "defaultProjectPathPlaceholder": "השאירו ריק כדי להשתמש בתיקיית ברירת המחדל הגלובלית",
+    "permissionMode": "הרשאת ברירת מחדל",
+    "permissionFullAccess": "גישה מלאה",
+    "permissionDefault": "הרשאת ברירת מחדל",
+    "toolsTitle": "כלים מובנים",
+    "compactionTitle": "דחיסה אוטומטית",
+    "compactionEnabled": "הפעלת דחיסה אוטומטית",
+    "compactionDescription": "ברירות המחדל האלה משפיעות רק על שיחות DeepChat חדשות.",
+    "compactionThreshold": "סף הפעלה",
+    "compactionRetainPairs": "שמירת הזוגות האחרונים",
+    "deleteConfirm": "למחוק את הסוכן \"{name}\"? ההיסטוריה שלו תחזור לסוכן DeepChat המובנה.",
+    "subagentsTitle": "סוכני משנה",
+    "subagentsDescription": "הגדירו את משבצות שיחות-הבת הניתנות לשימוש חוזר ש-`subagent_orchestrator` חושף.",
+    "subagentsEnabled": "הפעלת סוכני משנה",
+    "subagentTargetType": "סוג יעד",
+    "subagentTargetSelf": "הסוכן הזה",
+    "subagentTargetAgent": "סוכן",
+    "subagentDisplayName": "שם תצוגה",
+    "subagentDescription": "תיאור המשבצת",
+    "subagentTargetAgentLabel": "סוכן יעד",
+    "subagentLimit": "{count}/{max} משבצות",
+    "addSubagentSlot": "+ הוספת משבצת"
   }
 }

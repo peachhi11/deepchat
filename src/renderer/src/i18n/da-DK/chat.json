@@ -35,18 +35,41 @@
     "agentWorkspaceTooltip": "Indstil agentens arbejdsmappe",
     "attach": "Vedhæft",
     "voiceInput": "Stemmeinput",
+    "queue": "Læg i kø",
+    "stop": "Stop",
     "mcp": {
       "badge": "MCP {count}",
       "title": "Aktiverede MCP'er",
       "empty": "Ingen aktiverede tjenester",
       "openSettings": "Åbn MCP-indstillinger"
+    },
+    "tools": {
+      "badge": "Tools",
+      "title": "Tools",
+      "mcpSection": "MCP",
+      "builtinSection": "Indbyggede værktøjer",
+      "loading": "Loading tools...",
+      "builtinEmpty": "No built-in tools available",
+      "groups": {
+        "agentFilesystem": "Agent Filesystem",
+        "agentCore": "Agent Core",
+        "agentSkills": "Agent Skills",
+        "deepchatSettings": "DeepChat Settings",
+        "yobrowser": "YoBrowser"
+      }
     }
   },
-  "mcpUi": {
-    "badge": "UI",
-    "collapse": "Skjul",
-    "expand": "udvide",
-    "title": "MCP-brugergrænseflade"
+  "pendingInput": {
+    "steer": "Styring",
+    "queueCount": "Afventer {count}/{max}",
+    "resumeQueue": "Fortsæt afsendelse",
+    "toSteer": "Brug til styring",
+    "locked": "Låst",
+    "reorder": "Omarranger",
+    "files": "{count} filer",
+    "attachmentsOnly": "{count} vedhæftede filer",
+    "empty": "Tom besked",
+    "limitReached": "Venteområdet er fuldt (maks. {max})."
   },
   "messages": {
     "rateLimitEstimated": "Forventet ventetid",
@@ -58,18 +81,8 @@
     "rateLimitSwitchProvider": "Skift tjenesteudbyder",
     "rateLimitTitle": "Anmodningsfrekvensbegrænsning",
     "rateLimitWaiting": "Anmodningsfrekvensbegrænsning, venter i kø...",
+    "rateLimitCompactLoading": "Hastighedsbegrænset ({seconds}s)",
     "thinking": "Tænker..."
-  },
-  "navigation": {
-    "assistantMessage": "Assistentens svar",
-    "noMessages": "Ingen nyheder endnu",
-    "noResults": "Ingen matchende besked fundet",
-    "searchPlaceholder": "Søg beskeder...",
-    "searchResults": "Fundet {count} resultater, i alt {total} beskeder",
-    "title": "Beskednavigation",
-    "totalMessages": "I alt {count} beskeder",
-    "unknownMessage": "Ukendt besked",
-    "userMessage": "Brugermeddelelse"
   },
   "notify": {
     "generationComplete": "Generering fuldført",
@@ -98,6 +111,23 @@
     "params": "parameter",
     "response": "Værktøjsrespons",
     "responseData": "Svardata",
+    "subagents": {
+      "summary": "{mode} · {count} underagenter",
+      "unnamedTask": "Unavngiven opgave",
+      "mode": {
+        "parallel": "Parallel",
+        "chain": "Kæde"
+      },
+      "status": {
+        "queued": "I kø",
+        "running": "Kører",
+        "completed": "Fuldført",
+        "error": "Fejl",
+        "cancelled": "Annulleret",
+        "waiting_permission": "Afventer tilladelse",
+        "waiting_question": "Afventer input"
+      }
+    },
     "title": "Værktøjsopkald"
   },
   "mode": {
@@ -107,7 +137,8 @@
   },
   "topbar": {
     "share": "Del",
-    "more": "Mere"
+    "more": "Mere",
+    "backToParent": "Tilbage til forælder"
   },
   "advancedSettings": {
     "button": "Avanceret",
@@ -120,16 +151,28 @@
     "maxTokens": "Maks. tokens",
     "thinkingBudget": "Tænkebudget",
     "verbosity": "Detaljegrad",
+    "forceInterleavedThinkingCompat": "Interleaved Thinking",
+    "forceInterleavedThinkingCompatDescription": "Styrer, om denne session håndterer beskeder med ræsonnering og tool-calls med Interleaved Thinking.",
     "verbosityPlaceholder": "Vælg detaljegrad",
     "currentCustomPrompt": "Aktuel brugerdefineret",
-    "useDefault": "Brug standard"
+    "useDefault": "Brug standard",
+    "decreaseValue": "Reducer {label}",
+    "increaseValue": "Øg {label}",
+    "toggleValue": "Slå {label} til eller fra",
+    "validation": {
+      "finiteNumber": "Skal være et endeligt tal",
+      "nonNegativeInteger": "Skal være et ikke-negativt heltal",
+      "contextLengthAtLeastMaxTokens": "Skal være større end eller lig med maksimumtokens",
+      "maxTokensWithinContextLength": "Skal være mindre end eller lig med kontekstlængden"
+    }
   },
   "workspace": {
     "collapse": "tæt",
     "sections": {
       "files": "Filer",
       "git": "Git",
-      "artifacts": "Artifacts"
+      "artifacts": "Artifacts",
+      "subagents": "Underagenter"
     },
     "files": {
       "contextMenu": {
@@ -183,7 +226,19 @@
         "truncated": "[afkortet]"
       }
     },
-    "title": "arbejdsrum"
+    "title": "arbejdsrum",
+    "subagents": {
+      "empty": "Ingen undersessioner endnu",
+      "self": "Denne agent",
+      "status": {
+        "working": "Kører",
+        "error": "Fejl",
+        "idle": "Inaktiv"
+      }
+    }
+  },
+  "modelPicker": {
+    "empty": "Ingen modeller fundet"
   },
   "audio": {
     "play": "Afspil",
@@ -222,9 +277,60 @@
     "allAgents": "Alle agenter",
     "expandSidebar": "Udvid sidepanelet",
     "collapseSidebar": "Skjul sidepanelet",
+    "remoteControlStatus": {
+      "disabled": "Fjernstyring er deaktiveret",
+      "stopped": "Fjernstyring er stoppet",
+      "starting": "Fjernstyring starter",
+      "running": "Fjernstyring kører",
+      "backoff": "Fjernstyring prøver igen",
+      "error": "Fjernstyringsfejl"
+    },
     "groupByDate": "Gruppér efter dato",
     "groupByProject": "Gruppér efter projekt",
+    "pinned": "Fastgjorte",
     "emptyTitle": "Ingen samtaler endnu",
-    "emptyDescription": "Start en ny samtale for at komme i gang"
+    "emptyDescription": "Start en ny samtale for at komme i gang",
+    "remoteControlDisabled": "Deaktiveret",
+    "searchPlaceholder": "Søg i chats",
+    "searchAriaLabel": "Søg i chats",
+    "searchEmptyTitle": "Ingen matchende samtaler",
+    "searchEmptyDescription": "Prøv et andet nøgleord i titlen"
+  },
+  "floatingWidget": {
+    "title": "DeepChat",
+    "collapse": "Skjul flydende sessioner",
+    "empty": "Ingen DeepChat-sessioner endnu",
+    "executing": "aktiv",
+    "sessionCount": "{count} sessioner",
+    "untitled": "Ny chat",
+    "status": {
+      "inProgress": "I gang",
+      "done": "Færdig",
+      "error": "Fejl"
+    }
+  },
+  "subagents": {
+    "label": "Underagenter"
+  },
+  "spotlight": {
+    "placeholder": "Søg i samtaler, agenter, indstillinger og handlinger…",
+    "searching": "Søger…",
+    "emptyTitle": "Ingen matchende resultater",
+    "emptyDescription": "Prøv et andet søgeord, eller åbn en nylig session.",
+    "hints": "↑↓ flyt · Enter åbn · Esc luk · Home/End hop",
+    "kind": {
+      "session": "Session",
+      "message": "Besked",
+      "agent": "Agent",
+      "setting": "Indstilling",
+      "action": "Handling"
+    }
+  },
+  "inlineSearch": {
+    "placeholder": "Søg i samtalen",
+    "ariaLabel": "Søg i den aktuelle samtale",
+    "previous": "Forrige match",
+    "next": "Næste match",
+    "close": "Luk søgning"
   }
 }

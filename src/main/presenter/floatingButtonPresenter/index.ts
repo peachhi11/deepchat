@@ -1,14 +1,53 @@
 import { FloatingButtonWindow } from './FloatingButtonWindow'
 import { FloatingButtonConfig, FloatingButtonState, DEFAULT_FLOATING_BUTTON_CONFIG } from './types'
-import { ipcMain, Menu, app, screen } from 'electron'
+import {
+  buildFloatingWidgetSnapshot,
+  getPeekedCollapsedBounds,
+  getWidgetSizeForSnapshot,
+  repositionWidgetForResize,
+  snapWidgetBoundsToEdge,
+  type WidgetRect
+} from './layout'
+import type { FloatingWidgetSnapshot } from '@shared/types/floating-widget'
+import type { SessionWithState } from '@shared/types/agent-interface'
+import { BrowserWindow, ipcMain, Menu, app, screen } from 'electron'
 import { FLOATING_BUTTON_EVENTS } from '@/events'
 import { presenter } from '../index'
 import { IConfigPresenter } from '@shared/presenter'
+import { FLOATING_BUTTON_AVAILABLE } from '@shared/featureFlags'
+
+const EMPTY_SNAPSHOT: FloatingWidgetSnapshot = {
+  expanded: false,
+  activeCount: 0,
+  sessions: []
+}
+
+const WIDGET_LAYOUT_ANIMATION_DURATION_MS = 360
+const WIDGET_LAYOUT_ANIMATION_INTERVAL_MS = 16
+const COLLAPSE_REVEAL_LOCK_MS = WIDGET_LAYOUT_ANIMATION_DURATION_MS + 120
+const COLLAPSED_WIDGET_INACTIVE_OPACITY = 0.5
+const ACTIVE_WIDGET_OPACITY = 1
+
+type DragRuntimeState = {
+  startX: number
+  startY: number
+  windowX: number
+  windowY: number
+  windowWidth: number
+  windowHeight: number
+}
 
 export class FloatingButtonPresenter {
   private floatingWindow: FloatingButtonWindow | null = null
   private config: FloatingButtonConfig
   private configPresenter: IConfigPresenter
+  private snapshot: FloatingWidgetSnapshot = { ...EMPTY_SNAPSHOT }
+  private layoutAnimationTimer: ReturnType<typeof setInterval> | null = null
+  private collapseRevealTimer: ReturnType<typeof setTimeout> | null = null
+  private isDragging = false
+  private isHovered = false
+  private collapseRevealLock = false
+  private pendingLayoutSync = false
 
   constructor(configPresenter: IConfigPresenter) {
     this.configPresenter = configPresenter
@@ -17,10 +56,13 @@ export class FloatingButtonPresenter {
     }
   }
 
-  /**
-   * 初始化悬浮按钮功能
-   */
   public async initialize(config?: Partial<FloatingButtonConfig>): Promise<void> {
+    if (!FLOATING_BUTTON_AVAILABLE) {
+      this.destroy()
+      console.log('FloatingButton is temporarily unavailable, skipping initialization')
+      return
+    }
+
     const floatingButtonEnabled = this.configPresenter.getFloatingButtonEnabled()
     try {
       this.config = {
@@ -41,21 +83,24 @@ export class FloatingButtonPresenter {
     }
   }
 
-  /**
-   * 销毁悬浮按钮功能
-   */
   public destroy(): void {
     this.config.enabled = false
+    this.snapshot = { ...EMPTY_SNAPSHOT }
+    this.isDragging = false
+    this.isHovered = false
+    this.clearCollapseRevealLock()
+    this.pendingLayoutSync = false
+    this.stopLayoutAnimation()
 
-    const floatingChatWindow = presenter.windowPresenter.getFloatingChatWindow()
-    if (floatingChatWindow?.isShowing()) {
-      floatingChatWindow.hide()
-      console.log('FloatingChatWindow closed when disabling floating button')
-    }
-
-    // 清理所有事件监听器
+    ipcMain.removeHandler(FLOATING_BUTTON_EVENTS.SNAPSHOT_REQUEST)
+    ipcMain.removeHandler(FLOATING_BUTTON_EVENTS.LANGUAGE_REQUEST)
+    ipcMain.removeHandler(FLOATING_BUTTON_EVENTS.THEME_REQUEST)
     ipcMain.removeAllListeners(FLOATING_BUTTON_EVENTS.CLICKED)
     ipcMain.removeAllListeners(FLOATING_BUTTON_EVENTS.RIGHT_CLICKED)
+    ipcMain.removeAllListeners(FLOATING_BUTTON_EVENTS.HOVER_STATE_CHANGED)
+    ipcMain.removeAllListeners(FLOATING_BUTTON_EVENTS.TOGGLE_EXPANDED)
+    ipcMain.removeAllListeners(FLOATING_BUTTON_EVENTS.SET_EXPANDED)
+    ipcMain.removeAllListeners(FLOATING_BUTTON_EVENTS.OPEN_SESSION)
     ipcMain.removeAllListeners(FLOATING_BUTTON_EVENTS.DRAG_START)
     ipcMain.removeAllListeners(FLOATING_BUTTON_EVENTS.DRAG_MOVE)
     ipcMain.removeAllListeners(FLOATING_BUTTON_EVENTS.DRAG_END)
@@ -66,33 +111,32 @@ export class FloatingButtonPresenter {
     }
   }
 
-  /**
-   * 启用悬浮按钮
-   */
   public async enable(): Promise<void> {
-    console.log(
-      'FloatingButtonPresenter.enable called, current enabled:',
-      this.config.enabled,
-      'has window:',
-      !!this.floatingWindow
-    )
+    if (!FLOATING_BUTTON_AVAILABLE) {
+      this.destroy()
+      console.log('FloatingButton is temporarily unavailable, skipping enable')
+      return
+    }
 
     this.config.enabled = true
 
     if (this.floatingWindow) {
-      console.log('FloatingButton window already exists, showing it')
+      await this.refreshWidgetState()
+      this.refreshLanguage()
+      await this.refreshTheme()
       this.floatingWindow.show()
-      return // 已经存在窗口，只需显示
+      return
     }
 
-    console.log('Creating new floating button window')
     await this.createFloatingWindow()
   }
 
-  /**
-   * 设置悬浮按钮启用状态
-   */
   public async setEnabled(enabled: boolean): Promise<void> {
+    if (!FLOATING_BUTTON_AVAILABLE) {
+      this.destroy()
+      return
+    }
+
     if (enabled) {
       await this.enable()
     } else {
@@ -100,227 +144,477 @@ export class FloatingButtonPresenter {
     }
   }
 
-  /**
-   * 获取当前配置
-   */
   public getConfig(): FloatingButtonConfig {
     return { ...this.config }
   }
 
-  /**
-   * 获取当前状态
-   */
   public getState(): FloatingButtonState | null {
     return this.floatingWindow?.getState() || null
   }
 
-  /**
-   * 创建悬浮窗口
-   */
+  public async refreshWidgetState(): Promise<void> {
+    try {
+      const sessions = await this.loadDeepChatSessions()
+      this.snapshot = buildFloatingWidgetSnapshot(sessions, this.snapshot.expanded)
+      this.applyWindowLayout()
+      this.pushSnapshotToRenderer()
+    } catch (error) {
+      console.error('Failed to refresh floating widget state:', error)
+    }
+  }
+
+  public refreshLanguage(): void {
+    if (!this.floatingWindow?.exists()) {
+      return
+    }
+
+    const buttonWindow = this.floatingWindow.getWindow()
+    if (!buttonWindow || buttonWindow.isDestroyed()) {
+      return
+    }
+
+    buttonWindow.webContents.send(
+      FLOATING_BUTTON_EVENTS.LANGUAGE_CHANGED,
+      this.configPresenter.getLanguage()
+    )
+  }
+
+  public async refreshTheme(): Promise<void> {
+    if (!this.floatingWindow?.exists()) {
+      return
+    }
+
+    const buttonWindow = this.floatingWindow.getWindow()
+    if (!buttonWindow || buttonWindow.isDestroyed()) {
+      return
+    }
+
+    buttonWindow.webContents.send(FLOATING_BUTTON_EVENTS.THEME_CHANGED, await this.resolveTheme())
+  }
+
   private async createFloatingWindow(): Promise<void> {
-    ipcMain.removeAllListeners(FLOATING_BUTTON_EVENTS.CLICKED)
-    ipcMain.removeAllListeners(FLOATING_BUTTON_EVENTS.RIGHT_CLICKED)
-    ipcMain.removeAllListeners(FLOATING_BUTTON_EVENTS.DRAG_START)
-    ipcMain.removeAllListeners(FLOATING_BUTTON_EVENTS.DRAG_MOVE)
-    ipcMain.removeAllListeners(FLOATING_BUTTON_EVENTS.DRAG_END)
-
-    let isDuringDragSession = false
-
-    // 处理点击事件
-    ipcMain.on(FLOATING_BUTTON_EVENTS.CLICKED, async () => {
-      if (isDuringDragSession) {
-        return
-      }
-      try {
-        let floatingButtonPosition: { x: number; y: number; width: number; height: number } | null =
-          null
-        if (this.floatingWindow && this.floatingWindow.exists()) {
-          const buttonWindow = this.floatingWindow.getWindow()
-          if (buttonWindow && !buttonWindow.isDestroyed()) {
-            const bounds = buttonWindow.getBounds()
-            floatingButtonPosition = {
-              x: bounds.x,
-              y: bounds.y,
-              width: bounds.width,
-              height: bounds.height
-            }
-          }
-        }
-        if (floatingButtonPosition) {
-          await presenter.windowPresenter.toggleFloatingChatWindow(floatingButtonPosition)
-        } else {
-          await presenter.windowPresenter.toggleFloatingChatWindow()
-        }
-      } catch (error) {
-        console.error('Failed to handle floating button click:', error)
-      }
-    })
-
-    ipcMain.on(FLOATING_BUTTON_EVENTS.RIGHT_CLICKED, () => {
-      try {
-        this.showContextMenu()
-      } catch (error) {
-        console.error('Failed to handle floating button right click:', error)
-      }
-    })
-
-    // 处理拖拽事件
-    let wasFloatingChatVisibleBeforeDrag = false // 记录拖拽前浮窗是否可见
-    let dragState: {
-      isDragging: boolean
-      startX: number
-      startY: number
-      windowX: number
-      windowY: number
-    } | null = null
-
-    ipcMain.on(FLOATING_BUTTON_EVENTS.DRAG_START, (_event, { x, y }: { x: number; y: number }) => {
-      isDuringDragSession = true
-      try {
-        if (this.floatingWindow && this.floatingWindow.exists()) {
-          const buttonWindow = this.floatingWindow.getWindow()
-          if (buttonWindow && !buttonWindow.isDestroyed()) {
-            const bounds = buttonWindow.getBounds()
-
-            // 检查浮窗是否可见，如果可见则隐藏
-            const floatingChatWindow = presenter.windowPresenter.getFloatingChatWindow()
-            wasFloatingChatVisibleBeforeDrag = floatingChatWindow?.isShowing() || false
-
-            if (wasFloatingChatVisibleBeforeDrag) {
-              floatingChatWindow?.hide()
-              console.log('FloatingChatWindow hidden during drag start')
-            }
-
-            dragState = {
-              isDragging: true,
-              startX: x,
-              startY: y,
-              windowX: bounds.x,
-              windowY: bounds.y
-            }
-          }
-        }
-      } catch (error) {
-        console.error('Failed to handle drag start:', error)
-      }
-    })
-
-    ipcMain.on(FLOATING_BUTTON_EVENTS.DRAG_MOVE, (_event, { x, y }: { x: number; y: number }) => {
-      try {
-        if (
-          dragState &&
-          dragState.isDragging &&
-          this.floatingWindow &&
-          this.floatingWindow.exists()
-        ) {
-          const buttonWindow = this.floatingWindow.getWindow()
-          if (buttonWindow && !buttonWindow.isDestroyed()) {
-            const deltaX = x - dragState.startX
-            const deltaY = y - dragState.startY
-            const newX = dragState.windowX + deltaX
-            const newY = dragState.windowY + deltaY
-
-            buttonWindow.setBounds({
-              x: newX,
-              y: newY,
-              width: this.config.size.width,
-              height: this.config.size.height
-            })
-          }
-        }
-      } catch (error) {
-        console.error('Failed to handle drag move:', error)
-      }
-    })
-
-    ipcMain.on(FLOATING_BUTTON_EVENTS.DRAG_END, (_event, _data: { x: number; y: number }) => {
-      try {
-        if (
-          dragState &&
-          dragState.isDragging &&
-          this.floatingWindow &&
-          this.floatingWindow.exists()
-        ) {
-          const buttonWindow = this.floatingWindow.getWindow()
-          if (buttonWindow && !buttonWindow.isDestroyed()) {
-            // 多显示器边界检查
-            const bounds = buttonWindow.getBounds()
-            const currentDisplay = screen.getDisplayMatching(bounds)
-            const { workArea } = currentDisplay
-
-            // 确保悬浮球完全在当前显示器的工作区内
-            const targetX = Math.max(
-              workArea.x,
-              Math.min(bounds.x, workArea.x + workArea.width - bounds.width)
-            )
-            const targetY = Math.max(
-              workArea.y,
-              Math.min(bounds.y, workArea.y + workArea.height - bounds.height)
-            )
-
-            // 只有在越界时才调整位置
-            if (targetX !== bounds.x || targetY !== bounds.y) {
-              buttonWindow.setPosition(targetX, targetY)
-            }
-          }
-        }
-
-        // 如果拖拽前浮窗是可见的，拖拽结束后重新显示
-        if (wasFloatingChatVisibleBeforeDrag) {
-          const floatingChatWindow = presenter.windowPresenter.getFloatingChatWindow()
-          if (floatingChatWindow) {
-            // 获取悬浮球当前位置，用于计算浮窗显示位置
-            let floatingButtonPosition:
-              | { x: number; y: number; width: number; height: number }
-              | undefined = undefined
-            if (this.floatingWindow && this.floatingWindow.exists()) {
-              const buttonWindow = this.floatingWindow.getWindow()
-              if (buttonWindow && !buttonWindow.isDestroyed()) {
-                const bounds = buttonWindow.getBounds()
-                floatingButtonPosition = {
-                  x: bounds.x,
-                  y: bounds.y,
-                  width: bounds.width,
-                  height: bounds.height
-                }
-              }
-            }
-
-            floatingChatWindow.show(floatingButtonPosition)
-            console.log('FloatingChatWindow shown after drag end')
-          }
-        }
-
-        // 重置拖拽状态
-        dragState = null
-        wasFloatingChatVisibleBeforeDrag = false
-      } catch (error) {
-        console.error('Failed to handle drag end:', error)
-      } finally {
-        isDuringDragSession = false
-      }
-    })
+    this.registerIpcHandlers()
 
     if (!this.floatingWindow) {
       this.floatingWindow = new FloatingButtonWindow(this.config)
       await this.floatingWindow.create()
     }
 
-    // 悬浮按钮创建后立即显示
+    await this.refreshWidgetState()
+    this.refreshLanguage()
+    await this.refreshTheme()
     this.floatingWindow.show()
-
-    this.preCreateFloatingChatWindow()
   }
 
-  private preCreateFloatingChatWindow(): void {
-    try {
-      presenter.windowPresenter.createFloatingChatWindow().catch((error) => {
-        console.error('Failed to pre-create floating chat window:', error)
+  private registerIpcHandlers(): void {
+    ipcMain.removeHandler(FLOATING_BUTTON_EVENTS.SNAPSHOT_REQUEST)
+    ipcMain.removeHandler(FLOATING_BUTTON_EVENTS.LANGUAGE_REQUEST)
+    ipcMain.removeHandler(FLOATING_BUTTON_EVENTS.THEME_REQUEST)
+    ipcMain.removeAllListeners(FLOATING_BUTTON_EVENTS.CLICKED)
+    ipcMain.removeAllListeners(FLOATING_BUTTON_EVENTS.RIGHT_CLICKED)
+    ipcMain.removeAllListeners(FLOATING_BUTTON_EVENTS.HOVER_STATE_CHANGED)
+    ipcMain.removeAllListeners(FLOATING_BUTTON_EVENTS.TOGGLE_EXPANDED)
+    ipcMain.removeAllListeners(FLOATING_BUTTON_EVENTS.SET_EXPANDED)
+    ipcMain.removeAllListeners(FLOATING_BUTTON_EVENTS.OPEN_SESSION)
+    ipcMain.removeAllListeners(FLOATING_BUTTON_EVENTS.DRAG_START)
+    ipcMain.removeAllListeners(FLOATING_BUTTON_EVENTS.DRAG_MOVE)
+    ipcMain.removeAllListeners(FLOATING_BUTTON_EVENTS.DRAG_END)
+
+    let dragState: DragRuntimeState | null = null
+
+    ipcMain.handle(FLOATING_BUTTON_EVENTS.SNAPSHOT_REQUEST, async () => {
+      if (this.snapshot.sessions.length === 0 && !this.snapshot.expanded) {
+        await this.refreshWidgetState()
+      }
+      return this.snapshot
+    })
+
+    ipcMain.handle(FLOATING_BUTTON_EVENTS.LANGUAGE_REQUEST, async () => {
+      return this.configPresenter.getLanguage()
+    })
+
+    ipcMain.handle(FLOATING_BUTTON_EVENTS.THEME_REQUEST, async () => {
+      return await this.resolveTheme()
+    })
+
+    ipcMain.on(FLOATING_BUTTON_EVENTS.CLICKED, () => {
+      this.toggleExpanded()
+    })
+
+    ipcMain.on(FLOATING_BUTTON_EVENTS.RIGHT_CLICKED, () => {
+      this.showContextMenu()
+    })
+
+    ipcMain.on(FLOATING_BUTTON_EVENTS.HOVER_STATE_CHANGED, (_event, hovering: boolean) => {
+      this.setHovering(Boolean(hovering))
+    })
+
+    ipcMain.on(FLOATING_BUTTON_EVENTS.TOGGLE_EXPANDED, () => {
+      this.toggleExpanded()
+    })
+
+    ipcMain.on(FLOATING_BUTTON_EVENTS.SET_EXPANDED, (_event, expanded: boolean) => {
+      this.setExpanded(Boolean(expanded))
+    })
+
+    ipcMain.on(FLOATING_BUTTON_EVENTS.OPEN_SESSION, (_event, sessionId: string) => {
+      void this.openSession(sessionId)
+    })
+
+    ipcMain.on(FLOATING_BUTTON_EVENTS.DRAG_START, (_event, { x, y }: { x: number; y: number }) => {
+      if (!this.floatingWindow?.exists()) {
+        return
+      }
+
+      const bounds = this.floatingWindow.getBounds()
+      if (!bounds) {
+        return
+      }
+
+      this.stopLayoutAnimation()
+      this.clearCollapseRevealLock()
+      this.isDragging = true
+      const stableBounds = this.getSnapshotBounds(bounds)
+      this.floatingWindow.setBounds(stableBounds)
+      this.floatingWindow.setOpacity(this.resolveWindowOpacity())
+
+      dragState = {
+        startX: x,
+        startY: y,
+        windowX: stableBounds.x,
+        windowY: stableBounds.y,
+        windowWidth: stableBounds.width,
+        windowHeight: stableBounds.height
+      }
+    })
+
+    ipcMain.on(FLOATING_BUTTON_EVENTS.DRAG_MOVE, (_event, { x, y }: { x: number; y: number }) => {
+      if (!dragState || !this.floatingWindow?.exists()) {
+        return
+      }
+
+      const deltaX = x - dragState.startX
+      const deltaY = y - dragState.startY
+
+      this.floatingWindow.setBounds({
+        x: dragState.windowX + deltaX,
+        y: dragState.windowY + deltaY,
+        width: dragState.windowWidth,
+        height: dragState.windowHeight
       })
-      console.log('Started pre-creating floating chat window in background')
-    } catch (error) {
-      console.error('Error starting pre-creation of floating chat window:', error)
+    })
+
+    ipcMain.on(FLOATING_BUTTON_EVENTS.DRAG_END, () => {
+      if (!dragState || !this.floatingWindow?.exists()) {
+        this.isDragging = false
+        dragState = null
+        return
+      }
+
+      const bounds = this.floatingWindow.getBounds()
+      if (!bounds) {
+        this.isDragging = false
+        dragState = null
+        return
+      }
+
+      const stableBounds = {
+        x: bounds.x,
+        y: bounds.y,
+        width: dragState.windowWidth,
+        height: dragState.windowHeight
+      }
+      const currentDisplay = screen.getDisplayMatching(stableBounds)
+      const snapped = snapWidgetBoundsToEdge(stableBounds, currentDisplay.workArea)
+      this.floatingWindow.setDockSide(snapped.dockSide)
+      this.floatingWindow.setBounds(snapped)
+      this.isDragging = false
+      dragState = null
+      this.floatingWindow.setOpacity(this.resolveWindowOpacity())
+      const hadPendingLayoutSync = this.pendingLayoutSync
+      this.flushPendingLayoutSync()
+      if (!hadPendingLayoutSync) {
+        this.applyWindowLayout()
+      }
+    })
+  }
+
+  private setExpanded(expanded: boolean): void {
+    if (this.snapshot.expanded === expanded) {
+      return
     }
+
+    const wasExpanded = this.snapshot.expanded
+    if (expanded) {
+      this.clearCollapseRevealLock()
+    }
+
+    this.snapshot = {
+      ...this.snapshot,
+      expanded
+    }
+
+    if (wasExpanded && !expanded) {
+      this.engageCollapseRevealLock()
+    }
+
+    this.applyWindowLayout(true)
+    this.pushSnapshotToRenderer()
+  }
+
+  private toggleExpanded(): void {
+    this.setExpanded(!this.snapshot.expanded)
+  }
+
+  private setHovering(hovering: boolean): void {
+    if (this.isHovered === hovering) {
+      return
+    }
+
+    this.isHovered = hovering
+
+    if (!this.snapshot.expanded && this.collapseRevealLock) {
+      return
+    }
+
+    this.applyWindowLayout(true)
+  }
+
+  private applyWindowLayout(animate = false): void {
+    if (!this.floatingWindow?.exists()) {
+      return
+    }
+
+    if (this.isDragging) {
+      this.pendingLayoutSync = true
+      return
+    }
+
+    const bounds = this.floatingWindow.getBounds()
+    if (!bounds) {
+      return
+    }
+
+    const nextBounds = this.getSnapshotBounds(bounds)
+    this.floatingWindow.setOpacity(this.resolveWindowOpacity())
+
+    if (!animate || this.areBoundsEqual(bounds, nextBounds)) {
+      this.stopLayoutAnimation()
+      this.floatingWindow.setBounds(nextBounds)
+      return
+    }
+
+    this.animateWindowBounds(bounds, nextBounds)
+  }
+
+  private pushSnapshotToRenderer(): void {
+    if (!this.floatingWindow?.exists()) {
+      return
+    }
+
+    const buttonWindow = this.floatingWindow.getWindow()
+    if (!buttonWindow || buttonWindow.isDestroyed()) {
+      return
+    }
+
+    buttonWindow.webContents.send(FLOATING_BUTTON_EVENTS.SNAPSHOT_UPDATED, this.snapshot)
+  }
+
+  private animateWindowBounds(fromBounds: WidgetRect, toBounds: WidgetRect): void {
+    this.stopLayoutAnimation()
+
+    const startedAt = Date.now()
+    this.layoutAnimationTimer = setInterval(() => {
+      if (!this.floatingWindow?.exists()) {
+        this.stopLayoutAnimation()
+        return
+      }
+
+      const elapsed = Date.now() - startedAt
+      const progress = Math.min(1, elapsed / WIDGET_LAYOUT_ANIMATION_DURATION_MS)
+      const easedProgress = this.easeInOutCubic(progress)
+      const nextBounds: WidgetRect = {
+        x: Math.round(fromBounds.x + (toBounds.x - fromBounds.x) * easedProgress),
+        y: Math.round(fromBounds.y + (toBounds.y - fromBounds.y) * easedProgress),
+        width: Math.round(fromBounds.width + (toBounds.width - fromBounds.width) * easedProgress),
+        height: Math.round(
+          fromBounds.height + (toBounds.height - fromBounds.height) * easedProgress
+        )
+      }
+
+      this.floatingWindow.setBounds(nextBounds)
+
+      if (progress >= 1) {
+        this.stopLayoutAnimation()
+        this.floatingWindow?.setBounds(toBounds)
+      }
+    }, WIDGET_LAYOUT_ANIMATION_INTERVAL_MS)
+  }
+
+  private stopLayoutAnimation(): void {
+    if (this.layoutAnimationTimer) {
+      clearInterval(this.layoutAnimationTimer)
+      this.layoutAnimationTimer = null
+    }
+  }
+
+  private clearCollapseRevealLock(): void {
+    this.collapseRevealLock = false
+
+    if (this.collapseRevealTimer) {
+      clearTimeout(this.collapseRevealTimer)
+      this.collapseRevealTimer = null
+    }
+  }
+
+  private engageCollapseRevealLock(): void {
+    this.collapseRevealLock = true
+
+    if (this.collapseRevealTimer) {
+      clearTimeout(this.collapseRevealTimer)
+    }
+
+    this.collapseRevealTimer = setTimeout(() => {
+      this.collapseRevealTimer = null
+      this.collapseRevealLock = false
+      this.applyWindowLayout(true)
+    }, COLLAPSE_REVEAL_LOCK_MS)
+  }
+
+  private flushPendingLayoutSync(): void {
+    if (!this.pendingLayoutSync) {
+      return
+    }
+
+    this.pendingLayoutSync = false
+    this.applyWindowLayout()
+  }
+
+  private getSnapshotBounds(bounds: WidgetRect): WidgetRect {
+    if (!this.floatingWindow) {
+      return bounds
+    }
+
+    const currentDisplay = screen.getDisplayMatching(bounds)
+    const resizedBounds = repositionWidgetForResize(
+      bounds,
+      getWidgetSizeForSnapshot(this.snapshot),
+      currentDisplay.workArea,
+      this.floatingWindow.getDockSide()
+    )
+
+    if (!this.snapshot.expanded && !this.shouldRevealCollapsedWidget()) {
+      return getPeekedCollapsedBounds(
+        resizedBounds,
+        currentDisplay.workArea,
+        this.floatingWindow.getDockSide()
+      )
+    }
+
+    return resizedBounds
+  }
+
+  private shouldRevealCollapsedWidget(): boolean {
+    return this.snapshot.expanded || this.isHovered || this.isDragging || this.collapseRevealLock
+  }
+
+  private resolveWindowOpacity(): number {
+    return this.shouldRevealCollapsedWidget()
+      ? ACTIVE_WIDGET_OPACITY
+      : COLLAPSED_WIDGET_INACTIVE_OPACITY
+  }
+
+  private easeInOutCubic(progress: number): number {
+    return progress < 0.5
+      ? 4 * progress * progress * progress
+      : 1 - Math.pow(-2 * progress + 2, 3) / 2
+  }
+
+  private areBoundsEqual(left: WidgetRect, right: WidgetRect): boolean {
+    return (
+      left.x === right.x &&
+      left.y === right.y &&
+      left.width === right.width &&
+      left.height === right.height
+    )
+  }
+
+  private async resolveTheme(): Promise<'dark' | 'light'> {
+    const isDark = await this.configPresenter.getCurrentThemeIsDark()
+    return isDark ? 'dark' : 'light'
+  }
+
+  private async loadDeepChatSessions(): Promise<SessionWithState[]> {
+    const agentSessionPresenter = presenter.agentSessionPresenter as
+      | {
+          getSessionList?: (filters?: { agentId?: string }) => Promise<SessionWithState[]>
+        }
+      | undefined
+
+    if (!agentSessionPresenter?.getSessionList) {
+      return []
+    }
+
+    return await agentSessionPresenter.getSessionList({ agentId: 'deepchat' })
+  }
+
+  private async openSession(sessionId: string): Promise<void> {
+    try {
+      const agentSessionPresenter = presenter.agentSessionPresenter as
+        | {
+            activateSession?: (webContentsId: number, sessionId: string) => Promise<void>
+          }
+        | undefined
+
+      if (!agentSessionPresenter?.activateSession) {
+        return
+      }
+
+      const targetWindow = await this.resolveChatWindow()
+      if (!targetWindow || targetWindow.isDestroyed()) {
+        return
+      }
+
+      await agentSessionPresenter.activateSession(targetWindow.webContents.id, sessionId)
+      presenter.windowPresenter.show(targetWindow.id, true)
+      this.setExpanded(false)
+    } catch (error) {
+      console.error('Failed to open session from floating widget:', error)
+    }
+  }
+
+  private async resolveChatWindow(): Promise<BrowserWindow | null> {
+    const windowPresenter = presenter.windowPresenter
+    const tabPresenter = presenter.tabPresenter as unknown as {
+      getWindowType: (windowId: number) => 'chat' | 'browser'
+    }
+    const allChatWindows = windowPresenter
+      .getAllWindows()
+      .filter((window) => tabPresenter.getWindowType(window.id) === 'chat')
+
+    const focusedWindow = windowPresenter.getFocusedWindow()
+    if (
+      focusedWindow &&
+      !focusedWindow.isDestroyed() &&
+      allChatWindows.some((window) => window.id === focusedWindow.id)
+    ) {
+      return focusedWindow
+    }
+
+    if (allChatWindows.length > 0) {
+      return allChatWindows[0]
+    }
+
+    const createdWindowId = await windowPresenter.createAppWindow({ initialRoute: 'chat' })
+    if (!createdWindowId) {
+      return null
+    }
+
+    const managedWindowPresenter = windowPresenter as typeof windowPresenter & {
+      windows: Map<number, BrowserWindow>
+    }
+
+    return managedWindowPresenter.windows.get(createdWindowId) ?? null
   }
 
   private showContextMenu(): void {
@@ -328,7 +622,7 @@ export class FloatingButtonPresenter {
       {
         label: '打开主窗口',
         click: () => {
-          this.openMainWindow()
+          void this.openMainWindow()
         }
       },
       {
@@ -344,7 +638,7 @@ export class FloatingButtonPresenter {
 
     const contextMenu = Menu.buildFromTemplate(template)
 
-    if (this.floatingWindow && this.floatingWindow.exists()) {
+    if (this.floatingWindow?.exists()) {
       const buttonWindow = this.floatingWindow.getWindow()
       if (buttonWindow && !buttonWindow.isDestroyed()) {
         contextMenu.popup({ window: buttonWindow })
@@ -360,32 +654,19 @@ export class FloatingButtonPresenter {
     }
   }
 
-  private openMainWindow(): void {
-    try {
-      const windowPresenter = presenter.windowPresenter
-      if (windowPresenter) {
-        const mainWindow = windowPresenter.mainWindow
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          if (mainWindow.isMinimized()) {
-            mainWindow.restore()
-          }
-          mainWindow.show()
-          mainWindow.focus()
-          console.log('Main window opened from floating button context menu')
-        } else {
-          windowPresenter.createAppWindow({ initialRoute: 'chat' })
-          console.log('Created new main window from floating button context menu')
-        }
-      }
-    } catch (error) {
-      console.error('Failed to open main window from floating button:', error)
+  private async openMainWindow(): Promise<void> {
+    const targetWindow = await this.resolveChatWindow()
+    if (!targetWindow || targetWindow.isDestroyed()) {
+      return
     }
+
+    presenter.windowPresenter.show(targetWindow.id, true)
   }
 
   private exitApplication(): void {
     try {
       console.log('Exiting application from floating button context menu')
-      app.quit() // Exit trigger: floating menu
+      app.quit()
     } catch (error) {
       console.error('Failed to exit application from floating button:', error)
     }

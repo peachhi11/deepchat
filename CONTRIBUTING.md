@@ -27,6 +27,16 @@ We use GitHub to host code, to track issues and feature requests, as well as acc
 - Create a new feature branch named `feature/featurename`
 - Merge the feature branch back to `dev` branch upon completion
 
+#### Maintainer Release Flow
+
+- Keep `dev` as the integration branch and `main` as the stable mirror.
+- Cut a short-lived `release/<version>` branch from an existing commit on `dev`.
+- Open `release/<version> -> main` for review and CI, but do not use the GitHub merge button to land it.
+- macOS and Linux maintainers can land the approved release with `pnpm run release:ff -- release/<version> --tag v<version>`.
+- Windows maintainers must use the documented manual release steps instead of `pnpm run release:ff`.
+- Create the release tag on the same commit after `main` has been fast-forwarded.
+- See [docs/release-flow.md](./docs/release-flow.md) for the full maintainer procedure, manual fallback, and guardrails.
+
 ### External Contributors
 
 1. Fork this repository to your personal account
@@ -158,7 +168,7 @@ We use GitHub to host code, to track issues and feature requests, as well as acc
 ## Code Style
 
 - TypeScript + Vue 3 Composition API + Pinia; Tailwind + shadcn/ui for styling.
-- Prettier enforces single quotes and no semicolons; `pnpm run format` before committing.
+- Oxfmt enforces single quotes, no semicolons, and width 100; `pnpm run format` before committing.
 - OxLint is used for linting (`pnpm run lint`). Type checking via `pnpm run typecheck` (node + web targets).
 - Tests use Vitest (`test/main`, `test/renderer`). Name tests `*.test.ts`/`*.spec.ts`.
 - Follow naming conventions: PascalCase components/types, camelCase variables/functions, SCREAMING_SNAKE_CASE constants.
@@ -170,6 +180,7 @@ We use GitHub to host code, to track issues and feature requests, as well as acc
 3. Verify format + lint + typecheck + relevant tests locally; note anything not run.
 4. Target the `dev` branch; external contributors should fork-first and open PRs against `dev`.
 5. At least one maintainer approval is required before merge.
+6. PRs targeting `main` are reserved for `release/<version>` branches and are review-only; maintainers land them with the documented `ff-only` flow in [docs/release-flow.md](./docs/release-flow.md).
 
 ## Any Questions?
 

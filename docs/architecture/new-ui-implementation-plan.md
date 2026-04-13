@@ -556,8 +556,8 @@ sessionStore.selectSession(id)
 - `chat.ts`: Remove session management logic, keep message logic
 
 **Deprecated**:
-- `components/mock/*.vue`: Mock components can be deleted after completion
-- `composables/useMockViewState.ts`: Mock state management can be deleted
+- `components/mock/*.vue`: Removed after the new UI rollout, only historical docs remain
+- `composables/useMockViewState.ts`: Removed after stores took over the state flow
 
 ---
 

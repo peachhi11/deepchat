@@ -23,6 +23,7 @@ export interface SessionGenerationSettings {
   thinkingBudget?: number
   reasoningEffort?: 'minimal' | 'low' | 'medium' | 'high'
   verbosity?: 'low' | 'medium' | 'high'
+  forceInterleavedThinkingCompat?: boolean
 }
 
 export interface DeepChatSessionState {
@@ -30,6 +31,12 @@ export interface DeepChatSessionState {
   providerId: string
   modelId: string
   permissionMode: PermissionMode
+}
+
+export type PendingInputEnqueueSource = 'send' | 'queue'
+
+export interface QueuePendingInputOptions {
+  source?: PendingInputEnqueueSource
 }
 
 export interface IAgentImplementation {
@@ -56,8 +63,34 @@ export interface IAgentImplementation {
   processMessage(
     sessionId: string,
     content: string | SendMessageInput,
-    context?: { projectDir?: string | null; emitRefreshBeforeStream?: boolean }
+    context?: {
+      projectDir?: string | null
+      emitRefreshBeforeStream?: boolean
+      pendingQueueItemId?: string
+      pendingQueueItemSource?: PendingInputEnqueueSource
+    }
   ): Promise<void>
+
+  /** Manage waiting lane inputs */
+  listPendingInputs?(sessionId: string): Promise<PendingSessionInputRecord[]>
+  queuePendingInput?(
+    sessionId: string,
+    content: string | SendMessageInput,
+    options?: QueuePendingInputOptions
+  ): Promise<PendingSessionInputRecord>
+  updateQueuedInput?(
+    sessionId: string,
+    itemId: string,
+    content: string | SendMessageInput
+  ): Promise<PendingSessionInputRecord>
+  moveQueuedInput?(
+    sessionId: string,
+    itemId: string,
+    toIndex: number
+  ): Promise<PendingSessionInputRecord[]>
+  convertPendingInputToSteer?(sessionId: string, itemId: string): Promise<PendingSessionInputRecord>
+  deletePendingInput?(sessionId: string, itemId: string): Promise<void>
+  resumePendingQueue?(sessionId: string): Promise<void>
 
   /** Cancel an in-progress generation */
   cancelGeneration(sessionId: string): Promise<void>
@@ -166,6 +199,22 @@ export interface SendMessageInput {
   files?: MessageFile[]
 }
 
+export type PendingSessionInputMode = 'queue' | 'steer'
+export type PendingSessionInputState = 'pending' | 'claimed' | 'consumed'
+
+export interface PendingSessionInputRecord {
+  id: string
+  sessionId: string
+  mode: PendingSessionInputMode
+  state: PendingSessionInputState
+  payload: SendMessageInput
+  queueOrder: number | null
+  claimedAt: number | null
+  consumedAt: number | null
+  createdAt: number
+  updatedAt: number
+}
+
 export type AssistantBlockType =
   | 'content'
   | 'search'
@@ -173,12 +222,16 @@ export type AssistantBlockType =
   | 'error'
   | 'tool_call'
   | 'action'
+  | 'image'
 
 export interface ToolCallBlockData {
   id?: string
   name?: string
   params?: string
   response?: string
+  rtkApplied?: boolean
+  rtkMode?: 'rewrite' | 'direct' | 'bypass'
+  rtkFallbackReason?: string
   server_name?: string
   server_icons?: string
   server_description?: string
@@ -208,6 +261,8 @@ export interface AssistantMessageExtra {
   questionResolution?: 'asked' | 'replied' | 'rejected'
   answerText?: string
   answerMessageId?: string
+  subagentProgress?: string
+  subagentFinal?: string
   [key: string]: string | number | boolean | object[] | undefined
 }
 
@@ -223,15 +278,21 @@ export interface AssistantMessageBlock {
         start: number
         end: number
       }
+  image_data?: {
+    data: string
+    mimeType: string
+  }
   tool_call?: ToolCallBlockData
   extra?: AssistantMessageExtra
-  action_type?: 'tool_call_permission' | 'question_request'
+  action_type?: 'tool_call_permission' | 'question_request' | 'rate_limit'
 }
 
 export interface MessageMetadata {
   totalTokens?: number
   inputTokens?: number
   outputTokens?: number
+  cachedInputTokens?: number
+  cacheWriteInputTokens?: number
   generationTime?: number
   firstTokenTime?: number
   reasoningStartTime?: number
@@ -258,6 +319,100 @@ export interface ChatMessageRecord {
   updatedAt: number
 }
 
+export interface UsageStatsBackfillStatus {
+  status: 'idle' | 'running' | 'completed' | 'failed'
+  startedAt: number | null
+  finishedAt: number | null
+  error: string | null
+  updatedAt: number
+}
+
+export interface UsageDashboardSummary {
+  messageCount: number
+  sessionCount: number
+  inputTokens: number
+  outputTokens: number
+  totalTokens: number
+  cachedInputTokens: number
+  cacheHitRate: number
+  estimatedCostUsd: number | null
+  mostActiveDay: {
+    date: string | null
+    messageCount: number
+  }
+}
+
+export interface UsageDashboardCalendarDay {
+  date: string
+  messageCount: number
+  inputTokens: number
+  outputTokens: number
+  totalTokens: number
+  cachedInputTokens: number
+  estimatedCostUsd: number | null
+  level: 0 | 1 | 2 | 3 | 4
+}
+
+export interface UsageDashboardBreakdownItem {
+  id: string
+  label: string
+  messageCount: number
+  inputTokens: number
+  outputTokens: number
+  totalTokens: number
+  cachedInputTokens: number
+  estimatedCostUsd: number | null
+}
+
+export type RtkHealthStatus = 'checking' | 'healthy' | 'unhealthy'
+export type RtkRuntimeSource = 'bundled' | 'system' | 'none'
+export type RtkFailureStage = 'resolve' | 'version' | 'rewrite' | 'smoke' | 'gain' | 'runtime'
+
+export interface UsageDashboardRtkSummary {
+  totalCommands: number
+  totalInputTokens: number
+  totalOutputTokens: number
+  totalSavedTokens: number
+  avgSavingsPct: number
+  totalTimeMs: number
+  avgTimeMs: number
+}
+
+export interface UsageDashboardRtkDay {
+  date: string
+  commands: number
+  inputTokens: number
+  outputTokens: number
+  savedTokens: number
+  savingsPct: number
+  totalTimeMs: number
+  avgTimeMs: number
+}
+
+export interface UsageDashboardRtkData {
+  scope: 'deepchat'
+  enabled: boolean
+  effectiveEnabled: boolean
+  available: boolean
+  health: RtkHealthStatus
+  checkedAt: number | null
+  source: RtkRuntimeSource
+  failureStage: RtkFailureStage | null
+  failureMessage: string | null
+  summary: UsageDashboardRtkSummary
+  daily: UsageDashboardRtkDay[]
+}
+
+export interface UsageDashboardData {
+  recordingStartedAt: number | null
+  backfillStatus: UsageStatsBackfillStatus
+  summary: UsageDashboardSummary
+  calendar: UsageDashboardCalendarDay[]
+  providerBreakdown: UsageDashboardBreakdownItem[]
+  modelBreakdown: UsageDashboardBreakdownItem[]
+  rtk: UsageDashboardRtkData
+}
+
 export interface MessageTraceRecord {
   id: string
   messageId: string
@@ -274,11 +429,109 @@ export interface MessageTraceRecord {
 
 // ---- Session / Agent Types ----
 
+export type AgentType = 'deepchat' | 'acp'
+export type AgentSource = 'builtin' | 'manual' | 'registry'
+
+export interface AgentAvatarLucide {
+  kind: 'lucide'
+  icon: string
+  lightColor?: string | null
+  darkColor?: string | null
+}
+
+export interface AgentAvatarMonogram {
+  kind: 'monogram'
+  text: string
+  backgroundColor?: string | null
+}
+
+export type AgentAvatar = AgentAvatarLucide | AgentAvatarMonogram
+
+export interface DeepChatAgentModelSelection {
+  providerId: string
+  modelId: string
+}
+
+export interface DeepChatAgentModelPreset extends DeepChatAgentModelSelection {
+  temperature?: number
+  contextLength?: number
+  maxTokens?: number
+  thinkingBudget?: number
+  reasoningEffort?: SessionGenerationSettings['reasoningEffort']
+  verbosity?: SessionGenerationSettings['verbosity']
+  forceInterleavedThinkingCompat?: boolean
+}
+
+export interface DeepChatSubagentSlot {
+  id: string
+  targetType: 'self' | 'agent'
+  targetAgentId?: string
+  displayName: string
+  description: string
+}
+
+export type SessionKind = 'regular' | 'subagent'
+
+export interface DeepChatSubagentMeta {
+  slotId: string
+  displayName: string
+  targetAgentId?: string | null
+}
+
+export interface DeepChatAgentConfig {
+  defaultModelPreset?: DeepChatAgentModelPreset | null
+  assistantModel?: DeepChatAgentModelSelection | null
+  visionModel?: DeepChatAgentModelSelection | null
+  defaultProjectPath?: string | null
+  systemPrompt?: string
+  permissionMode?: PermissionMode
+  disabledAgentTools?: string[]
+  subagentEnabled?: boolean
+  subagents?: DeepChatSubagentSlot[]
+  autoCompactionEnabled?: boolean
+  autoCompactionTriggerThreshold?: number
+  autoCompactionRetainRecentPairs?: number
+}
+
+export interface CreateDeepChatAgentInput {
+  name: string
+  enabled?: boolean
+  description?: string
+  icon?: string
+  avatar?: AgentAvatar | null
+  config?: DeepChatAgentConfig | null
+}
+
+export interface UpdateDeepChatAgentInput {
+  name?: string
+  enabled?: boolean
+  description?: string
+  icon?: string
+  avatar?: AgentAvatar | null
+  config?: DeepChatAgentConfig | null
+}
+
 export interface Agent {
   id: string
   name: string
-  type: 'deepchat' | 'acp'
+  type: AgentType
+  agentType?: AgentType
   enabled: boolean
+  protected?: boolean
+  icon?: string
+  description?: string
+  source?: AgentSource
+  avatar?: AgentAvatar | null
+  config?: DeepChatAgentConfig | null
+  installState?: {
+    status: 'not_installed' | 'installing' | 'installed' | 'error'
+    distributionType?: 'binary' | 'npx' | 'uvx' | 'manual' | null
+    version?: string | null
+    installedAt?: number | null
+    lastCheckedAt?: number | null
+    installDir?: string | null
+    error?: string | null
+  } | null
 }
 
 export interface SessionRecord {
@@ -288,6 +541,10 @@ export interface SessionRecord {
   projectDir: string | null
   isPinned: boolean
   isDraft?: boolean
+  sessionKind: SessionKind
+  parentSessionId?: string | null
+  subagentEnabled: boolean
+  subagentMeta?: DeepChatSubagentMeta | null
   createdAt: number
   updatedAt: number
 }
@@ -329,6 +586,21 @@ export interface CreateSessionInput {
   modelId?: string
   permissionMode?: PermissionMode
   activeSkills?: string[]
+  disabledAgentTools?: string[]
+  subagentEnabled?: boolean
+  generationSettings?: Partial<SessionGenerationSettings>
+}
+
+export interface CreateDetachedSessionInput {
+  agentId?: string
+  title?: string
+  projectDir?: string
+  providerId?: string
+  modelId?: string
+  permissionMode?: PermissionMode
+  activeSkills?: string[]
+  disabledAgentTools?: string[]
+  subagentEnabled?: boolean
   generationSettings?: Partial<SessionGenerationSettings>
 }
 
@@ -339,4 +611,13 @@ export interface Project {
   name: string
   icon: string | null
   lastAccessedAt: number
+}
+
+export interface EnvironmentSummary {
+  path: string
+  name: string
+  sessionCount: number
+  lastUsedAt: number
+  isTemp: boolean
+  exists: boolean
 }

@@ -6,20 +6,20 @@ This document tracks the development progress of new UI feature implementation. 
 
 **Architecture Design**: [new-ui-implementation-plan.md](../../architecture/new-ui-implementation-plan.md)
 
-## Mock Reference File List
+## Historical Reference Map
 
-| Mock File | Purpose | Target Replacement |
+| Historical Mock | Purpose | Target Replacement |
 |-----------|---------|-------------------|
-| `components/mock/MockWelcomePage.vue` | Welcome page | `pages/WelcomePage.vue` |
-| `components/NewThreadMock.vue` | NewThread page | `pages/NewThreadPage.vue` |
-| `components/mock/MockChatPage.vue` | Chat page | `pages/ChatPage.vue` |
-| `components/mock/MockTopBar.vue` | Top bar | `components/chat/ChatTopBar.vue` |
-| `components/mock/MockMessageList.vue` | Message list | `components/chat/MessageList.vue` |
-| `components/mock/MockInputBox.vue` | Input box | `components/chat/ChatInputBox.vue` |
-| `components/mock/MockInputToolbar.vue` | Input toolbar | `components/chat/ChatInputToolbar.vue` |
-| `components/mock/MockStatusBar.vue` | Status bar | `components/chat/ChatStatusBar.vue` |
+| `MockWelcomePage` | Welcome page | `pages/WelcomePage.vue` |
+| `NewThreadMock` | NewThread page | `pages/NewThreadPage.vue` |
+| `MockChatPage` | Chat page | `pages/ChatPage.vue` |
+| `MockTopBar` | Top bar | `components/chat/ChatTopBar.vue` |
+| `MockMessageList` | Message list | `components/chat/MessageList.vue` |
+| `MockInputBox` | Input box | `components/chat/ChatInputBox.vue` |
+| `MockInputToolbar` | Input toolbar | `components/chat/ChatInputToolbar.vue` |
+| `MockStatusBar` | Status bar | `components/chat/ChatStatusBar.vue` |
 | `components/WindowSideBar.vue` | Sidebar | (refactored in place) |
-| `composables/useMockViewState.ts` | State management | Replaced by stores |
+| `useMockViewState` | State management | Replaced by stores |
 
 ---
 
@@ -240,15 +240,15 @@ This document tracks the development progress of new UI feature implementation. 
 
 ### 5.5 Cleanup
 
-- [ ] Delete `components/mock/MockWelcomePage.vue`
-- [ ] Delete `components/mock/MockChatPage.vue`
-- [ ] Delete `components/mock/MockTopBar.vue`
-- [ ] Delete `components/mock/MockMessageList.vue`
-- [ ] Delete `components/mock/MockInputBox.vue`
-- [ ] Delete `components/mock/MockInputToolbar.vue`
-- [ ] Delete `components/mock/MockStatusBar.vue`
-- [ ] Delete `components/NewThreadMock.vue`
-- [ ] Delete `composables/useMockViewState.ts`
+- [x] Remove `components/mock/MockWelcomePage.vue` from the active tree
+- [x] Remove `components/mock/MockChatPage.vue` from the active tree
+- [x] Remove `components/mock/MockTopBar.vue` from the active tree
+- [x] Remove `components/mock/MockMessageList.vue` from the active tree
+- [x] Remove `components/mock/MockInputBox.vue` from the active tree
+- [x] Remove `components/mock/MockInputToolbar.vue` from the active tree
+- [x] Remove `components/mock/MockStatusBar.vue` from the active tree
+- [x] Remove `components/NewThreadMock.vue` from the active tree
+- [x] Remove `composables/useMockViewState.ts` from the active tree
 
 ---
 

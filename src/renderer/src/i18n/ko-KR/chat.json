@@ -28,12 +28,41 @@
     "agentWorkspaceTooltip": "에이전트 작업 디렉터리 설정",
     "attach": "첨부",
     "voiceInput": "음성 입력",
+    "queue": "대기열에 추가",
+    "stop": "중지",
     "mcp": {
       "badge": "MCP {count}",
       "title": "활성화된 MCP",
       "empty": "활성화된 서비스가 없습니다",
       "openSettings": "MCP 설정 열기"
+    },
+    "tools": {
+      "badge": "Tools",
+      "title": "Tools",
+      "mcpSection": "MCP",
+      "builtinSection": "내장 도구",
+      "loading": "Loading tools...",
+      "builtinEmpty": "No built-in tools available",
+      "groups": {
+        "agentFilesystem": "Agent Filesystem",
+        "agentCore": "Agent Core",
+        "agentSkills": "Agent Skills",
+        "deepchatSettings": "DeepChat Settings",
+        "yobrowser": "YoBrowser"
+      }
     }
+  },
+  "pendingInput": {
+    "steer": "유도",
+    "queueCount": "전송 대기 {count}/{max}",
+    "resumeQueue": "전송 계속",
+    "toSteer": "유도로 전환",
+    "locked": "잠금됨",
+    "reorder": "순서 변경",
+    "files": "파일 {count}개",
+    "attachmentsOnly": "첨부 {count}개",
+    "empty": "빈 메시지",
+    "limitReached": "대기 영역이 가득 찼습니다 (최대 {max}개)."
   },
   "features": {
     "webSearch": "웹 검색",
@@ -54,6 +83,7 @@
   "messages": {
     "thinking": "생각...",
     "rateLimitWaiting": "속도 제한으로 대기열에서 대기 중...",
+    "rateLimitCompactLoading": "속도 제한 중 ({seconds}초)",
     "rateLimitTitle": "요청 속도 제한",
     "rateLimitQueue": "대기열 위치",
     "rateLimitEstimated": "예상 대기 시간",
@@ -72,17 +102,6 @@
     "generationComplete": "생성이 완료되었습니다",
     "generationError": "생성에 실패했습니다"
   },
-  "navigation": {
-    "title": "메시지 내비게이션",
-    "searchPlaceholder": "메시지 검색...",
-    "noResults": "일치하는 메시지를 찾을 수 없습니다",
-    "noMessages": "아직 메시지가 없습니다",
-    "totalMessages": "총 {count}개의 메시지",
-    "searchResults": "{total}개 중 {count}개의 결과를 찾았습니다",
-    "userMessage": "사용자 메시지",
-    "assistantMessage": "어시스턴트 답변",
-    "unknownMessage": "알 수 없는 메시지"
-  },
   "toolCall": {
     "title": "도구 호출",
     "calling": "도구 호출 중",
@@ -92,13 +111,24 @@
     "clickToView": "자세히 보려면 클릭하세요",
     "functionName": "함수 이름",
     "params": "매개변수",
-    "responseData": "응답 데이터"
-  },
-  "mcpUi": {
-    "badge": "UI",
-    "collapse": "닫다",
-    "expand": "확장하다",
-    "title": "MCP UI"
+    "responseData": "응답 데이터",
+    "subagents": {
+      "summary": "{mode} · 하위 에이전트 {count}개",
+      "unnamedTask": "이름 없는 작업",
+      "mode": {
+        "parallel": "병렬",
+        "chain": "순차"
+      },
+      "status": {
+        "queued": "대기열",
+        "running": "실행 중",
+        "completed": "완료됨",
+        "error": "오류",
+        "cancelled": "취소됨",
+        "waiting_permission": "권한 대기",
+        "waiting_question": "입력 대기"
+      }
+    }
   },
   "mode": {
     "acpAgent": "ACP 에이전트",
@@ -107,7 +137,8 @@
   },
   "topbar": {
     "share": "공유",
-    "more": "더보기"
+    "more": "더보기",
+    "backToParent": "상위 세션으로 돌아가기"
   },
   "advancedSettings": {
     "button": "고급 설정",
@@ -120,16 +151,28 @@
     "maxTokens": "최대 토큰",
     "thinkingBudget": "사고 예산",
     "verbosity": "응답 상세도",
+    "forceInterleavedThinkingCompat": "Interleaved Thinking",
+    "forceInterleavedThinkingCompatDescription": "이 세션에서 reasoning 및 tool-call 메시지를 Interleaved Thinking 방식으로 처리할지 제어합니다.",
     "verbosityPlaceholder": "상세도 선택",
     "currentCustomPrompt": "현재 사용자 지정",
-    "useDefault": "기본값 사용"
+    "useDefault": "기본값 사용",
+    "decreaseValue": "{label} 줄이기",
+    "increaseValue": "{label} 늘리기",
+    "toggleValue": "{label} 켜기 또는 끄기",
+    "validation": {
+      "finiteNumber": "유한한 숫자여야 합니다",
+      "nonNegativeInteger": "0 이상의 정수여야 합니다",
+      "contextLengthAtLeastMaxTokens": "최대 출력 이상이어야 합니다",
+      "maxTokensWithinContextLength": "컨텍스트 길이 이하여야 합니다"
+    }
   },
   "workspace": {
     "collapse": "닫다",
     "sections": {
       "files": "파일",
       "git": "Git",
-      "artifacts": "Artifacts"
+      "artifacts": "Artifacts",
+      "subagents": "하위 에이전트"
     },
     "files": {
       "contextMenu": {
@@ -183,7 +226,19 @@
         "truncated": "[잘림]"
       }
     },
-    "title": "작업 공간"
+    "title": "작업 공간",
+    "subagents": {
+      "empty": "아직 하위 세션이 없습니다",
+      "self": "현재 에이전트",
+      "status": {
+        "working": "실행 중",
+        "error": "오류",
+        "idle": "대기 중"
+      }
+    }
+  },
+  "modelPicker": {
+    "empty": "모델을 찾을 수 없습니다"
   },
   "audio": {
     "play": "재생",
@@ -222,9 +277,60 @@
     "allAgents": "모든 에이전트",
     "expandSidebar": "사이드바 펼치기",
     "collapseSidebar": "사이드바 접기",
+    "remoteControlStatus": {
+      "disabled": "원격 제어가 비활성화됨",
+      "stopped": "원격 제어가 중지됨",
+      "starting": "원격 제어 시작 중",
+      "running": "원격 제어 실행 중",
+      "backoff": "원격 제어 재시도 중",
+      "error": "원격 제어 오류"
+    },
     "groupByDate": "날짜별 그룹화",
     "groupByProject": "프로젝트별 그룹화",
+    "pinned": "고정됨",
     "emptyTitle": "아직 대화가 없습니다",
-    "emptyDescription": "새 대화를 시작해 보세요"
+    "emptyDescription": "새 대화를 시작해 보세요",
+    "remoteControlDisabled": "사용 안 함",
+    "searchPlaceholder": "채팅 제목 검색",
+    "searchAriaLabel": "채팅 제목 검색",
+    "searchEmptyTitle": "일치하는 대화가 없습니다",
+    "searchEmptyDescription": "다른 제목 키워드를 시도해 보세요"
+  },
+  "floatingWidget": {
+    "title": "DeepChat",
+    "collapse": "플로팅 세션 접기",
+    "empty": "아직 DeepChat 세션이 없습니다",
+    "executing": "활성",
+    "sessionCount": "{count}개 세션",
+    "untitled": "새 채팅",
+    "status": {
+      "inProgress": "진행 중",
+      "done": "완료",
+      "error": "오류"
+    }
+  },
+  "subagents": {
+    "label": "하위 에이전트"
+  },
+  "spotlight": {
+    "placeholder": "대화, Agent, 설정, 동작 검색…",
+    "searching": "검색 중…",
+    "emptyTitle": "일치하는 결과가 없습니다",
+    "emptyDescription": "다른 키워드를 시도하거나 최근 세션을 열어 보세요.",
+    "hints": "↑↓ 이동 · Enter 열기 · Esc 닫기 · Home/End 이동",
+    "kind": {
+      "session": "세션",
+      "message": "메시지",
+      "agent": "Agent",
+      "setting": "설정",
+      "action": "동작"
+    }
+  },
+  "inlineSearch": {
+    "placeholder": "현재 대화 검색",
+    "ariaLabel": "현재 대화 검색",
+    "previous": "이전 일치",
+    "next": "다음 일치",
+    "close": "검색 닫기"
   }
 }

@@ -270,6 +270,35 @@ export class ToolManager {
     return 'write'
   }
 
+  private async resolveAcpSessionContext(conversationId?: string): Promise<{
+    agentId: string
+    providerId: string
+    projectDir: string | null
+  } | null> {
+    const sessionId = conversationId?.trim()
+    if (!sessionId) {
+      return null
+    }
+
+    try {
+      const session = await presenter.agentSessionPresenter.getSession(sessionId)
+      const agentId = session?.agentId?.trim()
+      const providerId = session?.providerId?.trim()
+      if (session && providerId === 'acp' && agentId) {
+        return {
+          agentId,
+          providerId,
+          projectDir: session.projectDir?.trim() || null
+        }
+      }
+
+      return null
+    } catch (error) {
+      console.warn('[ToolManager] Failed to resolve new session MCP context:', error)
+      return null
+    }
+  }
+
   // 检查工具调用权限
   private checkToolPermission(
     originalToolName: string,
@@ -418,46 +447,34 @@ export class ToolManager {
 
       const { client: targetClient, originalName } = targetInfo
       const toolServerName = targetClient.serverName
+      const hintedProviderId = toolCall.providerId?.trim()
+      const shouldResolveAcpContext =
+        Boolean(toolCall.conversationId) && (!hintedProviderId || hintedProviderId === 'acp')
 
-      // ACP agent-level MCP access control (only applies in "acp agent" chat mode)
-      if (toolCall.conversationId) {
-        const chatMode = this.configPresenter.getSetting<'agent' | 'acp agent'>('input_chatMode')
-        if (chatMode === 'acp agent') {
-          try {
-            let agentId: string | null = null
-
-            const session = await presenter.newAgentPresenter.getSession(toolCall.conversationId)
-            if (session?.agentId?.trim()) {
-              agentId = session.agentId.trim()
-            } else {
-              const conversation = await presenter.sessionPresenter.getConversation(
-                toolCall.conversationId
+      // ACP agent-level MCP access control resolves from session context, not global chat mode.
+      if (shouldResolveAcpContext && toolCall.conversationId) {
+        try {
+          const acpContext = await this.resolveAcpSessionContext(toolCall.conversationId)
+          if (acpContext?.providerId === 'acp' && acpContext.agentId) {
+            const acpAgents = await this.configPresenter.getAcpAgents()
+            if (acpAgents.some((item) => item.id === acpContext.agentId)) {
+              const selections = await this.configPresenter.getAgentMcpSelections(
+                acpContext.agentId
               )
-              if (typeof conversation?.settings?.modelId === 'string') {
-                const normalized = conversation.settings.modelId.trim()
-                agentId = normalized.length > 0 ? normalized : null
-              }
-            }
-
-            if (agentId) {
-              const acpAgents = await this.configPresenter.getAcpAgents()
-              if (acpAgents.some((item) => item.id === agentId)) {
-                const selections = await this.configPresenter.getAgentMcpSelections(agentId)
-                if (!selections?.length || !selections.includes(toolServerName)) {
-                  return {
-                    toolCallId: toolCall.id,
-                    content: `MCP server '${toolServerName}' is not allowed for ACP agent '${agentId}'. Configure MCP access in ACP settings.`,
-                    isError: true
-                  }
+              if (!selections?.length || !selections.includes(toolServerName)) {
+                return {
+                  toolCallId: toolCall.id,
+                  content: `MCP server '${toolServerName}' is not allowed for ACP agent '${acpContext.agentId}'. Configure MCP access in ACP settings.`,
+                  isError: true
                 }
               }
             }
-          } catch (error) {
-            console.warn(
-              '[ToolManager] Failed to resolve ACP agent context for MCP access control:',
-              error
-            )
           }
+        } catch (error) {
+          console.warn(
+            '[ToolManager] Failed to resolve ACP agent context for MCP access control:',
+            error
+          )
         }
       }
 

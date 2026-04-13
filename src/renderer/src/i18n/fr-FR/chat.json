@@ -28,12 +28,41 @@
     "agentWorkspaceTooltip": "Définir le répertoire de travail de l'agent",
     "attach": "Joindre",
     "voiceInput": "Saisie vocale",
+    "queue": "Ajouter à la file",
+    "stop": "Arrêter",
     "mcp": {
       "badge": "MCP {count}",
       "title": "MCP activés",
       "empty": "Aucun service activé",
       "openSettings": "Ouvrir les paramètres MCP"
+    },
+    "tools": {
+      "badge": "Tools",
+      "title": "Tools",
+      "mcpSection": "MCP",
+      "builtinSection": "Outils intégrés",
+      "loading": "Loading tools...",
+      "builtinEmpty": "No built-in tools available",
+      "groups": {
+        "agentFilesystem": "Agent Filesystem",
+        "agentCore": "Agent Core",
+        "agentSkills": "Agent Skills",
+        "deepchatSettings": "DeepChat Settings",
+        "yobrowser": "YoBrowser"
+      }
     }
+  },
+  "pendingInput": {
+    "steer": "Guidage",
+    "queueCount": "En attente {count}/{max}",
+    "resumeQueue": "Reprendre l'envoi",
+    "toSteer": "Guider",
+    "locked": "Verrouillé",
+    "reorder": "Réorganiser",
+    "files": "{count} fichiers",
+    "attachmentsOnly": "{count} pièces jointes",
+    "empty": "Message vide",
+    "limitReached": "La zone d'attente est pleine (max. {max})."
   },
   "features": {
     "webSearch": "Recherche web",
@@ -54,6 +83,7 @@
   "messages": {
     "thinking": "Pensée...",
     "rateLimitWaiting": "Limitation de débit, en attente dans la file...",
+    "rateLimitCompactLoading": "Limité par le débit ({seconds}s)",
     "rateLimitTitle": "Limitation de débit des requêtes",
     "rateLimitQueue": "Position dans la file",
     "rateLimitEstimated": "Temps d'attente estimé",
@@ -72,17 +102,6 @@
     "generationComplete": "La génération est complète",
     "generationError": "Échec de la génération"
   },
-  "navigation": {
-    "title": "Navigation des messages",
-    "searchPlaceholder": "Rechercher des messages...",
-    "noResults": "Aucun message correspondant trouvé",
-    "noMessages": "Aucun message pour le moment",
-    "totalMessages": "{count} messages au total",
-    "searchResults": "{count} résultats trouvés sur {total} messages",
-    "userMessage": "Message utilisateur",
-    "assistantMessage": "Réponse de l'assistant",
-    "unknownMessage": "Message inconnu"
-  },
   "toolCall": {
     "title": "Appel d'outil",
     "calling": "Appel d'outil en cours",
@@ -92,13 +111,24 @@
     "clickToView": "Cliquer pour voir les détails",
     "functionName": "Nom de la fonction",
     "params": "Paramètres",
-    "responseData": "Données de réponse"
-  },
-  "mcpUi": {
-    "badge": "Interface utilisateur",
-    "collapse": "fermer",
-    "expand": "Développer",
-    "title": "MCP UI"
+    "responseData": "Données de réponse",
+    "subagents": {
+      "summary": "{mode} · {count} sous-agents",
+      "unnamedTask": "Tâche sans nom",
+      "mode": {
+        "parallel": "Parallèle",
+        "chain": "En chaîne"
+      },
+      "status": {
+        "queued": "En attente",
+        "running": "En cours",
+        "completed": "Terminé",
+        "error": "Erreur",
+        "cancelled": "Annulé",
+        "waiting_permission": "En attente d'autorisation",
+        "waiting_question": "En attente d'entrée"
+      }
+    }
   },
   "mode": {
     "acpAgent": "Agent ACP",
@@ -107,7 +137,8 @@
   },
   "topbar": {
     "share": "Partager",
-    "more": "Plus"
+    "more": "Plus",
+    "backToParent": "Retour à la session parente"
   },
   "advancedSettings": {
     "button": "Avancé",
@@ -120,16 +151,28 @@
     "maxTokens": "Jetons max",
     "thinkingBudget": "Budget de réflexion",
     "verbosity": "Niveau de détail",
+    "forceInterleavedThinkingCompat": "Interleaved Thinking",
+    "forceInterleavedThinkingCompatDescription": "Détermine si cette session traite les messages de raisonnement et d'appel d'outil avec Interleaved Thinking.",
     "verbosityPlaceholder": "Sélectionner un niveau de détail",
     "currentCustomPrompt": "Personnalisé actuel",
-    "useDefault": "Utiliser la valeur par défaut"
+    "useDefault": "Utiliser la valeur par défaut",
+    "decreaseValue": "Réduire {label}",
+    "increaseValue": "Augmenter {label}",
+    "toggleValue": "Activer ou désactiver {label}",
+    "validation": {
+      "finiteNumber": "Doit être un nombre fini",
+      "nonNegativeInteger": "Doit être un entier positif ou nul",
+      "contextLengthAtLeastMaxTokens": "Doit être supérieur ou égal au nombre maximal de tokens",
+      "maxTokensWithinContextLength": "Doit être inférieur ou égal à la longueur de contexte"
+    }
   },
   "workspace": {
     "collapse": "fermer",
     "sections": {
       "files": "Fichiers",
       "git": "Git",
-      "artifacts": "Artifacts"
+      "artifacts": "Artifacts",
+      "subagents": "Sous-agents"
     },
     "files": {
       "contextMenu": {
@@ -183,7 +226,19 @@
         "truncated": "[Tronqué]"
       }
     },
-    "title": "espace de travail"
+    "title": "espace de travail",
+    "subagents": {
+      "empty": "Aucune session enfant pour le moment",
+      "self": "Cet agent",
+      "status": {
+        "working": "En cours",
+        "error": "Erreur",
+        "idle": "Inactif"
+      }
+    }
+  },
+  "modelPicker": {
+    "empty": "Aucun modèle trouvé"
   },
   "audio": {
     "play": "Lire",
@@ -222,9 +277,60 @@
     "allAgents": "Tous les agents",
     "expandSidebar": "Développer la barre latérale",
     "collapseSidebar": "Réduire la barre latérale",
+    "remoteControlStatus": {
+      "disabled": "Contrôle à distance désactivé",
+      "stopped": "Contrôle à distance arrêté",
+      "starting": "Démarrage du contrôle à distance",
+      "running": "Contrôle à distance en cours",
+      "backoff": "Nouvelle tentative du contrôle à distance",
+      "error": "Erreur du contrôle à distance"
+    },
     "groupByDate": "Grouper par date",
     "groupByProject": "Grouper par projet",
+    "pinned": "Épinglés",
     "emptyTitle": "Aucune conversation pour le moment",
-    "emptyDescription": "Commencez une nouvelle discussion pour démarrer"
+    "emptyDescription": "Commencez une nouvelle discussion pour démarrer",
+    "remoteControlDisabled": "Désactivé",
+    "searchPlaceholder": "Rechercher des chats",
+    "searchAriaLabel": "Rechercher des chats",
+    "searchEmptyTitle": "Aucune conversation correspondante",
+    "searchEmptyDescription": "Essayez un autre mot-clé de titre"
+  },
+  "floatingWidget": {
+    "title": "DeepChat",
+    "collapse": "Réduire les sessions flottantes",
+    "empty": "Aucune session DeepChat pour le moment",
+    "executing": "actif",
+    "sessionCount": "{count} sessions",
+    "untitled": "Nouvelle discussion",
+    "status": {
+      "inProgress": "En cours",
+      "done": "Terminée",
+      "error": "Erreur"
+    }
+  },
+  "subagents": {
+    "label": "Sous-agents"
+  },
+  "spotlight": {
+    "placeholder": "Rechercher des discussions, agents, paramètres et actions…",
+    "searching": "Recherche…",
+    "emptyTitle": "Aucun résultat correspondant",
+    "emptyDescription": "Essayez un autre mot-clé ou ouvrez une session récente.",
+    "hints": "↑↓ déplacer · Entrée ouvrir · Échap fermer · Home/End aller",
+    "kind": {
+      "session": "Session",
+      "message": "Message",
+      "agent": "Agent",
+      "setting": "Paramètre",
+      "action": "Action"
+    }
+  },
+  "inlineSearch": {
+    "placeholder": "Rechercher dans la conversation",
+    "ariaLabel": "Rechercher dans la conversation actuelle",
+    "previous": "Résultat précédent",
+    "next": "Résultat suivant",
+    "close": "Fermer la recherche"
   }
 }

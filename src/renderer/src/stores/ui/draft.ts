@@ -6,6 +6,15 @@ import type {
   SessionGenerationSettings
 } from '@shared/types/agent-interface'
 
+export interface StartDeeplinkPayload {
+  token: number
+  msg: string
+  modelId: string | null
+  systemPrompt: string
+  mentions: string[]
+  autoSend: boolean
+}
+
 // --- Store ---
 
 export const useDraftStore = defineStore('draft', () => {
@@ -21,7 +30,12 @@ export const useDraftStore = defineStore('draft', () => {
   const thinkingBudget = ref<number | undefined>(undefined)
   const reasoningEffort = ref<SessionGenerationSettings['reasoningEffort'] | undefined>(undefined)
   const verbosity = ref<SessionGenerationSettings['verbosity'] | undefined>(undefined)
+  const forceInterleavedThinkingCompat = ref<boolean | undefined>(undefined)
   const permissionMode = ref<PermissionMode>('full_access')
+  const disabledAgentTools = ref<string[]>([])
+  const subagentEnabled = ref(false)
+  const pendingStartDeeplink = ref<StartDeeplinkPayload | null>(null)
+  let nextStartToken = 0
 
   // --- Actions ---
 
@@ -35,6 +49,9 @@ export const useDraftStore = defineStore('draft', () => {
     if (thinkingBudget.value !== undefined) settings.thinkingBudget = thinkingBudget.value
     if (reasoningEffort.value !== undefined) settings.reasoningEffort = reasoningEffort.value
     if (verbosity.value !== undefined) settings.verbosity = verbosity.value
+    if (forceInterleavedThinkingCompat.value !== undefined) {
+      settings.forceInterleavedThinkingCompat = forceInterleavedThinkingCompat.value
+    }
 
     return Object.keys(settings).length > 0 ? settings : undefined
   }
@@ -47,6 +64,8 @@ export const useDraftStore = defineStore('draft', () => {
       providerId: providerId.value,
       modelId: modelId.value,
       permissionMode: permissionMode.value,
+      disabledAgentTools: [...disabledAgentTools.value],
+      subagentEnabled: subagentEnabled.value,
       generationSettings: toGenerationSettings()
     }
   }
@@ -73,6 +92,9 @@ export const useDraftStore = defineStore('draft', () => {
     if (Object.prototype.hasOwnProperty.call(settings, 'verbosity')) {
       verbosity.value = settings.verbosity
     }
+    if (Object.prototype.hasOwnProperty.call(settings, 'forceInterleavedThinkingCompat')) {
+      forceInterleavedThinkingCompat.value = settings.forceInterleavedThinkingCompat
+    }
   }
 
   function resetGenerationSettings(): void {
@@ -83,6 +105,7 @@ export const useDraftStore = defineStore('draft', () => {
     thinkingBudget.value = undefined
     reasoningEffort.value = undefined
     verbosity.value = undefined
+    forceInterleavedThinkingCompat.value = undefined
   }
 
   function reset(): void {
@@ -91,7 +114,24 @@ export const useDraftStore = defineStore('draft', () => {
     projectDir.value = undefined
     agentId.value = 'deepchat'
     permissionMode.value = 'full_access'
+    disabledAgentTools.value = []
+    subagentEnabled.value = false
     resetGenerationSettings()
+  }
+
+  function setPendingStartDeeplink(
+    payload: Omit<StartDeeplinkPayload, 'token'>
+  ): StartDeeplinkPayload {
+    const nextPayload: StartDeeplinkPayload = {
+      ...payload,
+      token: ++nextStartToken
+    }
+    pendingStartDeeplink.value = nextPayload
+    return nextPayload
+  }
+
+  function clearPendingStartDeeplink(): void {
+    pendingStartDeeplink.value = null
   }
 
   return {
@@ -106,11 +146,17 @@ export const useDraftStore = defineStore('draft', () => {
     thinkingBudget,
     reasoningEffort,
     verbosity,
+    forceInterleavedThinkingCompat,
     permissionMode,
+    disabledAgentTools,
+    subagentEnabled,
+    pendingStartDeeplink,
     toGenerationSettings,
     toCreateInput,
     updateGenerationSettings,
     resetGenerationSettings,
-    reset
+    reset,
+    setPendingStartDeeplink,
+    clearPendingStartDeeplink
   }
 })

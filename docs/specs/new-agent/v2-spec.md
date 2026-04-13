@@ -3,6 +3,7 @@
 ## Status: Complete (superseded by v3 refactor)
 
 > The v2 implementation has been refactored into the v3 module structure. See `v3-spec.md` for the current architecture. This spec is retained for historical context on design decisions.
+> Note: the historical MCP UI resource exploration mentioned below is no longer supported in the current codebase.
 
 ## Overview
 
@@ -22,7 +23,6 @@ v0 proved single-turn chat, v1 added multi-turn context assembly. The LLM curren
 - Question tool — halting the loop for user input
 - ACP agent tool routing — ACP handles tools internally
 - Search result extraction from tool responses
-- MCP UI resources extraction
 - Tool system prompt injection (`ToolPresenter.buildToolSystemPrompt`)
 
 ## Data Model
@@ -38,7 +38,7 @@ No new DB tables. Changes to existing types:
 The v2 goals are implemented in the v3 module structure. The original `streamHandler.ts` + `agentLoop.ts` were refactored into five focused modules:
 
 ```
-deepchatAgentPresenter/
+agentRuntimePresenter/
   index.ts           — session lifecycle + single processStream() call
   process.ts         — unified loop: stream → accumulate → echo → dispatch
   accumulator.ts     — accumulate(state, event): pure block mutations

@@ -2,6 +2,7 @@
 
 export interface MCPToolDefinition {
   type: string
+  source?: 'mcp' | 'agent'
   function: {
     name: string
     description: string
@@ -31,6 +32,7 @@ export interface MCPToolCall {
     description: string
   }
   conversationId?: string
+  providerId?: string
 }
 
 export type MCPContentItem = MCPTextContent | MCPImageContent | MCPResourceContent
@@ -62,6 +64,9 @@ export interface MCPToolResponse {
   _meta?: Record<string, unknown>
   isError?: boolean
   toolResult?: unknown
+  rtkApplied?: boolean
+  rtkMode?: 'rewrite' | 'direct' | 'bypass'
+  rtkFallbackReason?: string
   requiresPermission?: boolean
   permissionRequest?: {
     toolName: string

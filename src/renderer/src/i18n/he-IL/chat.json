@@ -28,12 +28,41 @@
     "agentWorkspaceTooltip": "הגדר את ספריית העבודה של הסוכן",
     "attach": "צרף",
     "voiceInput": "קלט קולי",
+    "queue": "הוסף לתור",
+    "stop": "עצור",
     "mcp": {
       "badge": "MCP {count}",
       "title": "MCP פעילים",
       "empty": "אין שירותים פעילים",
       "openSettings": "פתח הגדרות MCP"
+    },
+    "tools": {
+      "badge": "Tools",
+      "title": "Tools",
+      "mcpSection": "MCP",
+      "builtinSection": "כלים מובנים",
+      "loading": "Loading tools...",
+      "builtinEmpty": "No built-in tools available",
+      "groups": {
+        "agentFilesystem": "Agent Filesystem",
+        "agentCore": "Agent Core",
+        "agentSkills": "Agent Skills",
+        "deepchatSettings": "DeepChat Settings",
+        "yobrowser": "YoBrowser"
+      }
     }
+  },
+  "pendingInput": {
+    "steer": "הכוונה",
+    "queueCount": "ממתין לשליחה {count}/{max}",
+    "resumeQueue": "המשך שליחה",
+    "toSteer": "הפוך להכוונה",
+    "locked": "נעול",
+    "reorder": "שנה סדר",
+    "files": "{count} קבצים",
+    "attachmentsOnly": "{count} קבצים מצורפים",
+    "empty": "הודעה ריקה",
+    "limitReached": "אזור ההמתנה מלא (מקסימום {max})."
   },
   "features": {
     "webSearch": "חיפוש אינטרנט",
@@ -54,6 +83,7 @@
   "messages": {
     "thinking": "חושב...",
     "rateLimitWaiting": "הגעת למגבלת הקצב, ממתין בתור...",
+    "rateLimitCompactLoading": "מוגבל קצב ({seconds}ש׳)",
     "rateLimitTitle": "מגבלת קצב פעילה",
     "rateLimitQueue": "מיקום בתור",
     "rateLimitEstimated": "המתנה משוערת",
@@ -72,23 +102,6 @@
     "generationComplete": "היצירה הושלמה",
     "generationError": "היצירה נכשלה"
   },
-  "navigation": {
-    "title": "ניווט בהודעות",
-    "searchPlaceholder": "חפש הודעות...",
-    "noResults": "לא נמצאו הודעות תואמות",
-    "noMessages": "אין הודעות עדיין",
-    "totalMessages": "{count} הודעות סה\"כ",
-    "searchResults": "נמצאו {count} תוצאות בתוך {total} הודעות",
-    "userMessage": "הודעת משתמש",
-    "assistantMessage": "תשובת עוזר",
-    "unknownMessage": "הודעה לא ידועה"
-  },
-  "mcpUi": {
-    "title": "ממשק MCP",
-    "badge": "UI",
-    "expand": "הרחב",
-    "collapse": "צמצם"
-  },
   "toolCall": {
     "title": "קריאה לכלי",
     "calling": "קריאה לכלי בתהליך",
@@ -98,7 +111,24 @@
     "clickToView": "לחץ לצפייה בפרטים",
     "functionName": "פונקציה",
     "params": "פרמטרים",
-    "responseData": "נתוני תגובה"
+    "responseData": "נתוני תגובה",
+    "subagents": {
+      "summary": "{mode} · {count} סוכני משנה",
+      "unnamedTask": "משימה ללא שם",
+      "mode": {
+        "parallel": "במקביל",
+        "chain": "בטור"
+      },
+      "status": {
+        "queued": "ממתין בתור",
+        "running": "פועל",
+        "completed": "הושלם",
+        "error": "שגיאה",
+        "cancelled": "בוטל",
+        "waiting_permission": "ממתין לאישור",
+        "waiting_question": "ממתין לקלט"
+      }
+    }
   },
   "mode": {
     "acpAgent": "סוכן ACP",
@@ -107,7 +137,8 @@
   },
   "topbar": {
     "share": "שיתוף",
-    "more": "עוד"
+    "more": "עוד",
+    "backToParent": "חזרה לשיחת האב"
   },
   "advancedSettings": {
     "button": "מתקדם",
@@ -120,16 +151,28 @@
     "maxTokens": "מקסימום טוקנים",
     "thinkingBudget": "תקציב חשיבה",
     "verbosity": "רמת פירוט",
+    "forceInterleavedThinkingCompat": "Interleaved Thinking",
+    "forceInterleavedThinkingCompatDescription": "קובע אם בסשן הזה הודעות reasoning ו-tool-call יעובדו באמצעות Interleaved Thinking.",
     "verbosityPlaceholder": "בחר רמת פירוט",
     "currentCustomPrompt": "מותאם נוכחי",
-    "useDefault": "השתמש בברירת מחדל"
+    "useDefault": "השתמש בברירת מחדל",
+    "decreaseValue": "הקטן את {label}",
+    "increaseValue": "הגדל את {label}",
+    "toggleValue": "הפעל או כבה את {label}",
+    "validation": {
+      "finiteNumber": "חייב להיות מספר סופי",
+      "nonNegativeInteger": "חייב להיות מספר שלם לא שלילי",
+      "contextLengthAtLeastMaxTokens": "חייב להיות גדול או שווה למספר הטוקנים המרבי",
+      "maxTokensWithinContextLength": "חייב להיות קטן או שווה לאורך ההקשר"
+    }
   },
   "workspace": {
     "collapse": "לִסְגוֹר",
     "sections": {
       "files": "קבצים",
       "git": "Git",
-      "artifacts": "Artifacts"
+      "artifacts": "Artifacts",
+      "subagents": "סוכני משנה"
     },
     "files": {
       "contextMenu": {
@@ -183,7 +226,19 @@
         "truncated": "[מקוצר]"
       }
     },
-    "title": "סביבת עבודה"
+    "title": "סביבת עבודה",
+    "subagents": {
+      "empty": "עדיין אין שיחות-בת",
+      "self": "הסוכן הזה",
+      "status": {
+        "working": "פועל",
+        "error": "שגיאה",
+        "idle": "לא פעיל"
+      }
+    }
+  },
+  "modelPicker": {
+    "empty": "לא נמצאו מודלים"
   },
   "audio": {
     "play": "נגן",
@@ -222,9 +277,60 @@
     "allAgents": "כל הסוכנים",
     "expandSidebar": "הרחב את הסרגל הצדדי",
     "collapseSidebar": "כווץ את הסרגל הצדדי",
+    "remoteControlStatus": {
+      "disabled": "בקרה מרחוק מושבתת",
+      "stopped": "בקרה מרחוק נעצרה",
+      "starting": "הבקרה מרחוק מתחילה",
+      "running": "הבקרה מרחוק פועלת",
+      "backoff": "הבקרה מרחוק מנסה שוב",
+      "error": "שגיאת בקרה מרחוק"
+    },
     "groupByDate": "קבץ לפי תאריך",
     "groupByProject": "קבץ לפי פרויקט",
+    "pinned": "נעוצים",
     "emptyTitle": "עדיין אין שיחות",
-    "emptyDescription": "התחילו שיחה חדשה כדי להתחיל"
+    "emptyDescription": "התחילו שיחה חדשה כדי להתחיל",
+    "remoteControlDisabled": "מושבת",
+    "searchPlaceholder": "חיפוש בצ׳אטים",
+    "searchAriaLabel": "חיפוש בצ׳אטים",
+    "searchEmptyTitle": "לא נמצאו שיחות תואמות",
+    "searchEmptyDescription": "נסו מילת מפתח אחרת בכותרת"
+  },
+  "floatingWidget": {
+    "title": "DeepChat",
+    "collapse": "כווץ את הסשנים הצפים",
+    "empty": "עדיין אין סשנים של DeepChat",
+    "executing": "פעיל",
+    "sessionCount": "{count} סשנים",
+    "untitled": "צ'אט חדש",
+    "status": {
+      "inProgress": "בתהליך",
+      "done": "הושלם",
+      "error": "שגיאה"
+    }
+  },
+  "subagents": {
+    "label": "סוכני משנה"
+  },
+  "spotlight": {
+    "placeholder": "חיפוש שיחות, סוכנים, הגדרות ופעולות…",
+    "searching": "מחפש…",
+    "emptyTitle": "לא נמצאו תוצאות מתאימות",
+    "emptyDescription": "נסו מילת מפתח אחרת או פתחו שיחה אחרונה.",
+    "hints": "↑↓ מעבר · Enter פתיחה · Esc סגירה · Home/End קפיצה",
+    "kind": {
+      "session": "שיחה",
+      "message": "הודעה",
+      "agent": "סוכן",
+      "setting": "הגדרה",
+      "action": "פעולה"
+    }
+  },
+  "inlineSearch": {
+    "placeholder": "חיפוש בשיחה",
+    "ariaLabel": "חיפוש בשיחה הנוכחית",
+    "previous": "התאמה קודמת",
+    "next": "התאמה הבאה",
+    "close": "סגירת החיפוש"
   }
 }

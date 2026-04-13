@@ -61,12 +61,23 @@
     "fileMaxSizeHint": "アップロードできるファイルの最大サイズを制限します",
     "defaultModel": {
       "title": "デフォルトモデル",
-      "chatModel": "デフォルトチャットモデル",
-      "visionModel": "デフォルト視覚モデル"
+      "chatModel": "デフォルトチャットモデル"
+    },
+    "autoCompaction": {
+      "title": "自動圧縮",
+      "enabled": "自動圧縮を有効化",
+      "description": "会話がモデルのコンテキストウィンドウ上限に近づくと、DeepChat は古い履歴を自動で圧縮してセッションを継続できます。無効にすると、予算を超えた履歴は要約されずにそのまま破棄されます。",
+      "thresholdLabel": "発動しきい値",
+      "thresholdMin": "早め ({value}%)",
+      "thresholdMax": "遅め ({value}%)",
+      "thresholdDescription": "プロンプト使用量が有効な履歴予算のこの割合に達したら圧縮を開始します。低い値ほど余裕が増え、高い値ほど生のコンテキストを多く保持します。",
+      "retainPairsLabel": "直近のメッセージペアを保持",
+      "retainPairsValue": "{count} 組",
+      "retainPairsDescription": "直近で完了したユーザーとアシスタントのペアを圧縮対象から除外して保持します。現在の問い合わせは含みません。"
     }
   },
   "notificationsHooks": {
-    "title": "通知とフック",
+    "title": "フック",
     "description": "Webhook 通知とライフサイクルフックを設定します。",
     "events": {
       "title": "イベント",
@@ -160,6 +171,18 @@
       "backupSuccessTitle": "バックアップ成功",
       "backupSuccessMessage": "データは正常にバックアップされました"
     },
+    "modelConfigUpdate": {
+      "title": "モデル設定を更新",
+      "description": "上流の provider.json を強制的に更新し、モデル機能と既定設定を最新の状態にします。",
+      "button": "今すぐ更新",
+      "updating": "更新中...",
+      "updatedTitle": "モデル設定を更新しました",
+      "updatedDescription": "プロバイダーの最新メタデータを取得しました。",
+      "upToDateTitle": "すでに最新です",
+      "upToDateDescription": "ローカルのモデル設定は、すでに最新のプロバイダーメタデータを使用しています。",
+      "failedTitle": "更新に失敗しました",
+      "failedDescription": "現在モデル設定を更新できません。しばらくしてからもう一度お試しください。"
+    },
     "yoBrowser": {
       "clearButton": "YoBrowser データをクリアする",
       "clearFailedDescription": "もう一度試すか、ログで詳細を確認してください。",
@@ -173,6 +196,109 @@
       "description": "Cookie やローカル ストレージをメイン アプリケーションと共有しない独立したブラウザ サンドボックス。ここで、YoBrowser のデータをワンクリックでクリアできます。",
       "title": "YoBrowser サンドボックス"
     }
+  },
+  "dashboard": {
+    "badge": "使用ダッシュボード",
+    "title": "使用ダッシュボード",
+    "description": "token 消費、キャッシュヒット、推定コストを集計します。token と費用のデータは公開情報をもとに推定しており、一部のプロバイダーや過去のメッセージでは欠損する場合があるため、参考値としてご利用ください。",
+    "actions": {
+      "refresh": "更新"
+    },
+    "backfill": {
+      "runningTitle": "使用データを更新しています",
+      "runningDescription": "使用データはバックグラウンドで引き続き更新中です。現在の結果は先に確認できます。",
+      "failedTitle": "使用データの更新に失敗しました",
+      "failedDescription": "このページを再読み込みするか、しばらくしてから再試行してください。"
+    },
+    "error": {
+      "title": "ダッシュボードの読み込みに失敗しました",
+      "description": "しばらくしてからもう一度お試しください。"
+    },
+    "empty": {
+      "title": "使用統計はまだありません",
+      "description": "使用データが利用可能になると、token 消費、キャッシュヒット、推定コストがここに表示されます。",
+      "historyNote": "token と費用のデータは公開情報をもとに推定しています。一部のプロバイダーや過去のメッセージでは欠損する場合があるため、参考値としてご利用ください。"
+    },
+    "summary": {
+      "totalTokens": "総 token",
+      "totalTokensDescription": "総 token に占める入力 / 出力 token の構成を表示します。",
+      "inputTokensLabel": "入力",
+      "outputTokensLabel": "出力",
+      "cachedTokens": "キャッシュ token",
+      "cachedTokensDescription": "provider のキャッシュから返された prompt token。",
+      "cachedTokensCachedLabel": "キャッシュ",
+      "cachedTokensUncachedLabel": "未キャッシュ",
+      "cacheHitRate": "キャッシュヒット率",
+      "cacheHitRateDescription": "キャッシュされた prompt token を総入力 token で割った割合です。",
+      "estimatedCost": "推定コスト",
+      "estimatedCostDescription": "provider の価格、または AIHubMix の代替価格をもとに米ドルで推定したコストです。",
+      "estimatedCostTrendLabel": "直近30日間の推移",
+      "estimatedCostTrendEmpty": "直近30日間のコスト記録はありません。",
+      "recordingStartedAt": "記録開始時点",
+      "recordingStartedAtDescription": "このダッシュボードに現在保存されている最も古い使用記録です。",
+      "withDeepChatDaysLabel": "一緒に過ごした日数",
+      "withDeepChatDaysValue": "{days}日",
+      "withDeepChatDaysSentence": "DeepChatと過ごして{days}日目です。",
+      "withDeepChatDaysDescription": "最も古い使用記録（{date}）をもとに計算しています。",
+      "withDeepChatDaysDescriptionUnavailable": "まだ使用記録がありません。",
+      "tokenUsage": "Token 消費",
+      "nostalgiaLabel": "これまでの記録",
+      "nostalgiaDaysValue": "{days}日",
+      "nostalgiaSessionsValue": "{count}件のセッション",
+      "nostalgiaMessagesValue": "{count}件のメッセージ",
+      "nostalgiaDaysDetailLabel": "一緒に過ごした日々",
+      "nostalgiaDaysDetail": "あなたはDeepChatと{days}日を一緒に過ごしました。",
+      "nostalgiaSessionsDetailLabel": "セッション数",
+      "nostalgiaSessionsDetail": "一緒に{count}件のセッションを重ねました。",
+      "nostalgiaMessagesDetailLabel": "メッセージ数",
+      "nostalgiaMessagesDetail": "{count}件のメッセージをやり取りしました。",
+      "nostalgiaMostActiveDayLabel": "最もアクティブな日",
+      "nostalgiaMostActiveDayDetail": "{date}は最も活発な一日で、{count}件のメッセージがありました。"
+    },
+    "calendar": {
+      "title": "コントリビューションカレンダー",
+      "description": "直近 365 日の token 消費を日ごとに集計します。",
+      "legend": "少ない順から多い順",
+      "tooltip": "{date}: {tokens} token"
+    },
+    "breakdown": {
+      "providerTitle": "プロバイダー別ランキング",
+      "providerDescription": "推定コスト順で、同率の場合は総トークン数順です。",
+      "modelTitle": "モデル別ランキング",
+      "modelDescription": "推定コスト順、同率時は総トークン数順の上位10モデルです。",
+      "messages": "{count}件のメッセージ",
+      "empty": "表示できる内訳データはまだありません。"
+    },
+    "rtk": {
+      "title": "RTK節約量",
+      "description": "DeepChat のネイティブなコマンド実行時に、RTK がモデルコンテキストへ到達するのを防いだ推定トークン数です。",
+      "actions": {
+        "retry": "再確認"
+      },
+      "status": {
+        "disabled": "無効",
+        "checking": "確認中",
+        "healthy": "正常",
+        "unhealthy": "利用不可"
+      },
+      "descriptionDisabled": "このアプリセッションでは RTK が無効になっているため、コマンドは通常の実行経路で実行されます。",
+      "descriptionChecking": "DeepChat は現在の環境で RTK が正しく動作するか確認しています。",
+      "descriptionHealthy": "RTK は DeepChat のネイティブなコマンド実行で有効です。",
+      "descriptionUnhealthy": "RTK の起動時ヘルスチェックに失敗したため、このアプリセッションでは無効化されています。",
+      "sourceLabel": "ランタイムソース: {source}",
+      "source": {
+        "bundled": "同梱",
+        "system": "システム",
+        "none": "利用不可"
+      },
+      "summary": {
+        "savedTokens": "節約されたトークン",
+        "commands": "記録されたコマンド",
+        "avgSavingsPct": "平均削減率",
+        "outputTokens": "フィルタ後の出力"
+      }
+    },
+    "unavailable": "該当なし"
   },
   "model": {
     "title": "モデル設定",
@@ -203,6 +329,11 @@
     "provider": "サービスプロバイダー",
     "providerSetting": "サービスプロバイダーの設定",
     "selectModel": "モデルを選択します",
+    "form": {
+      "id": {
+        "label": "識別子"
+      }
+    },
     "modelConfig": {
       "cancel": "キャンセル",
       "contextLength": {
@@ -238,6 +369,10 @@
       "reasoning": {
         "description": "モデルは推論能力をサポートしていますか？",
         "label": "推論能力"
+      },
+      "interleavedThinking": {
+        "label": "Interleaved Thinking",
+        "description": "このモデルで reasoning と tool-call メッセージを Interleaved Thinking として処理するかを制御します。プロバイダーの既定値がある場合は自動的に適用されます。"
       },
       "thinkingBudget": {
         "label": "思考予算",
@@ -317,6 +452,19 @@
           "chat": "テキスト生成",
           "image": "画像生成"
         }
+      },
+      "endpointType": {
+        "label": "エンドポイントタイプ",
+        "description": "このモデルに対してNew APIが使用するアップストリームプロトコルを選択してください。",
+        "placeholder": "エンドポイントタイプを選択",
+        "required": "エンドポイントタイプは必須です",
+        "options": {
+          "openai": "OpenAI Chat",
+          "openai-response": "OpenAI Responses",
+          "anthropic": "Anthropic Messages",
+          "gemini": "Gemini Native",
+          "image-generation": "画像生成"
+        }
       }
     }
   },
@@ -349,6 +497,9 @@
     "urlFormat": "API例：{defaultUrl}",
     "urlFormatFill": "API URL に入力",
     "openaiResponsesNotice": "OpenAI 公式サービスはデフォルトで Responses API を使用します。サードパーティのエンドポイントが Chat Completions のみをサポートしている場合は、OpenAI Completions プロバイダーを使用してください。",
+    "modifyBaseUrl": "変更",
+    "baseUrlLockedHint": "このプロバイダーは設定ミスを減らすため、推奨されるベースURLに固定されています。",
+    "refreshModelsWithMetadataHint": "このプロバイダーを更新すると、まず上流メタデータを同期し、その後ローカルのモデル一覧を再構築します。",
     "modelList": "モデル一覧",
     "enableModels": "モデルを有効にする",
     "disableAllModels": "すべてのモデルを無効にする",
@@ -434,6 +585,20 @@
         "baseUrlPlaceholder": "API URLを入力してください",
         "enable": "プロバイダーを有効にする"
       },
+      "providerDeeplinkImport": {
+        "title": "プロバイダーをインポート",
+        "description": "適用する前に、解析されたプロバイダー設定を確認してください。",
+        "type": "タイプ",
+        "url": "URL",
+        "key": "キー",
+        "overwriteWarning": "このインポートにより、現在のプロバイダー設定が上書きされます。",
+        "confirming": "インポート中..."
+      },
+      "baseUrlUnlock": {
+        "title": "ベースURLの変更を確認",
+        "description": "このプロバイダーのベースURLを変更することは推奨されません。誤ったエンドポイントを設定すると、リクエストの失敗やその他の予期しない動作を引き起こす可能性があります。リスクを理解している場合は、そのまま続行できます。",
+        "confirm": "続行"
+      },
       "deleteProvider": {
         "title": "プロバイダーの削除確認",
         "content": "プロバイダー \"{name}\" を削除してもよろしいですか？この操作は元に戻せません。",
@@ -508,32 +673,16 @@
       "backupSuccessTitle": "バックアップが完了しました",
       "backupSuccessMessage": "バックアップを保存しました（時刻：{time}、サイズ：{size}）",
       "importSuccessTitle": "インポートが完了しました",
-      "importSuccessMessage": "{count} 件の会話を正常にインポートしました"
+      "importSuccessMessage": "{count} 件の会話を正常にインポートしました",
+      "refreshModelsSuccessTitle": "モデルを更新しました",
+      "refreshModelsSuccessDescription": "このプロバイダーの最新のモデル一覧を同期しました。",
+      "refreshModelsSuccessDescriptionWithMetadata": "このプロバイダーの上流メタデータと最新のモデル一覧を同期しました。",
+      "refreshModelsFailedTitle": "更新に失敗しました",
+      "refreshModelsFailedDescription": "現在、このプロバイダーのモデル一覧を更新できません。後でもう一度お試しください。",
+      "refreshModelsFailedDescriptionWithMetadata": "現在、このプロバイダーの上流メタデータとモデルを同期できません。後でもう一度お試しください。"
     },
-    "anthropicApiKeyTip": "APIキーを取得するには、人類コンソールにアクセスしてください",
-    "anthropicConnected": "人類接続",
-    "anthropicNotConnected": "人類は接続されていません",
-    "anthropicOAuthTip": "[deepchatの承認]をクリックして、人類アカウントにアクセスします",
-    "oauthLogin": "oauthログイン",
-    "authMethod": "認証方法",
-    "authMethodPlaceholder": "認証方法を選択",
     "apiKeyLabel": "API Key",
     "apiUrlLabel": "API URL",
-    "anthropicOAuthFlowTip": "システムは自動的に承認ウィンドウを開きます。承認後、戻って承認コードを入力してください。",
-    "anthropicBrowserOpened": "外部ブラウザが開いています",
-    "anthropicCodeInstruction": "外部ブラウザで承認を完了し、取得した認証コードを下の入力ボックスに貼り付けてください",
-    "browserOpenedSuccess": "外部ブラウザが開いています。承認を完了してください",
-    "codeRequired": "承認コードを入力してください",
-    "inputOAuthCode": "承認コードを入力します",
-    "codeExchangeFailed": "認証コード交換は失敗しました",
-    "invalidCode": "無効な承認コード",
-    "oauthCodeHint": "外部ブラウザで承認を完了した後、ここに承認コードを貼り付けてください",
-    "oauthCodePlaceholder": "承認コードを入力してください...",
-    "verifyConnection": "接続を確認",
-    "manageModels": "モデル管理",
-    "anthropicOAuthActiveTip": "OAuth認証が有効になっており、Anthropicサービスを直接使用できます",
-    "oauthVerifySuccess": "OAuth接続の確認が成功しました",
-    "oauthVerifyFailed": "OAuth接続の確認に失敗しました",
     "configurationSaved": "構成が保存されました",
     "configurationUpdated": "設定が更新されました",
     "dataRefreshed": "データは更新されています",
@@ -934,12 +1083,15 @@
     "goSettings": "設定を開く",
     "hideWindow": "ウィンドウを非表示にします",
     "quitApp": "プログラムを終了します",
+    "toggleSidebar": "サイドバーを表示/非表示",
+    "toggleWorkspace": "ワークスペースを表示/非表示",
     "zoomIn": "フォントにズームインします",
     "zoomOut": "フォントを削減します",
     "zoomReset": "フォントをリセットします",
     "newWindow": "新しいウィンドウを開きます",
     "showHideWindow": "ウィンドウを表示または非表示にします",
     "newConversation": "新しい会話",
+    "quickSearch": "Spotlight 検索",
     "closeWindow": "現在のタブページを閉じます"
   },
   "rateLimit": {
@@ -1101,14 +1253,64 @@
       "send": "リクエストの送信",
       "sending": "送信中...",
       "title": "ACPのデバッグ",
-      "workdirPlaceholder": "デフォルトの作業ディレクトリを使用するには空白のままにします"
+      "workdirPlaceholder": "デフォルトの作業ディレクトリを使用するには空白のままにします",
+      "healthCheck": "ヘルスチェック",
+      "healthChecking": "チェック中...",
+      "healthCheckFailed": "ヘルスチェックに失敗しました"
     },
     "mcpAccessBadge": "MCP {count}",
     "mcpAccessEmpty": "現在、オプションの MCP はありません。",
-    "mcpAccessTitle": "利用可能なMCP"
+    "mcpAccessTitle": "利用可能なMCP",
+    "registryCount": "{count} 個のAgent",
+    "registryEmpty": "現在の絞り込み条件に一致する Registry Agent はありません。",
+    "registryRefresh": "Registry を更新",
+    "registryRepair": "修復",
+    "registrySearchPlaceholder": "ACP Registry Agent を検索...",
+    "filters": {
+      "all": "すべての状態",
+      "enabled": "有効のみ",
+      "installed": "インストール済みのみ",
+      "attention": "要対応のみ"
+    },
+    "envOverrideTitle": "環境変数の上書き",
+    "envOverridePlaceholder": "1 行につき 1 つの KEY=VALUE",
+    "installState": {
+      "installed": "インストール済み",
+      "installing": "インストール中",
+      "error": "インストール失敗",
+      "notInstalled": "未インストール"
+    },
+    "registryInstallEntry": "Agent をインストール",
+    "registryInstallEntryDescription": "ACP Registry から Agent を検索してインストールし、インストール後にここへ戻って有効化と設定を行います。",
+    "sharedMcpTitle": "共有 MCP",
+    "sharedMcpDescription": "すべての ACP Agent で同じ MCP アクセス設定を共有します。",
+    "installedSectionTitle": "インストール済み Agent",
+    "installedSectionDescription": "インストール済みの Registry Agent のみ、ここで有効化、検査、環境変数上書きを行えます。",
+    "installedCount": "{count} 件インストール済み",
+    "installedEmptyTitle": "インストール済みの Registry Agent はまだありません",
+    "installedEmptyDescription": "まず ACP Registry から Agent をインストールし、その後ここで設定してください。",
+    "registryOverlayEmpty": "現在の絞り込み条件に一致する Agent はありません。",
+    "registryInstallAction": "インストール",
+    "registryUninstallAction": "アンインストール",
+    "registryUninstallConfirm": "「{name}」をアンインストールしますか？",
+    "registryUninstallDescription": "DeepChat はこのエージェントを無効化し、該当する場合はローカルで管理しているインストールデータを削除します。必要になったら ACP Registry から再インストールできます。",
+    "registryUninstallFailed": "エージェントのアンインストールに失敗しました",
+    "registryInstallTitle": "ACP Registry",
+    "registryInstallDescription": "ACP Agent を検索、絞り込み、インストールします。インストール後は設定画面に戻って構成してください。",
+    "registryLearnMore": "詳しく見る",
+    "registryRepository": "リポジトリ",
+    "installFilters": {
+      "all": "すべて",
+      "installed": "インストール済み",
+      "notInstalled": "未インストール"
+    }
   },
   "skills": {
     "addSkill": "スキル追加",
+    "draftSuggestions": {
+      "title": "スキルドラフトを提案",
+      "description": "タスク完了後、Agent が再利用可能な一時的なスキルドラフトを提案できるようにします。ドラフトは、手動でインポートすることを選ぶまで一時フォルダに保持されます。"
+    },
     "conflict": {
       "description": "「{name}」という名前のスキルが既に存在します。上書きしますか？",
       "overwrite": "覆う",
@@ -1139,7 +1341,24 @@
       "placeholder": "ここで skill 内容を編集...",
       "readFailed": "読み取り失敗",
       "success": "保存しました",
-      "title": "スキル編集"
+      "title": "スキル編集",
+      "runtimeTitle": "Runtime",
+      "runtimeHint": "Select how bundled scripts resolve Python and Node runtimes.",
+      "pythonRuntime": "Python Runtime",
+      "nodeRuntime": "Node Runtime",
+      "envTitle": "Environment Variables",
+      "envWarning": "Masked in the UI only. Values are stored as plain text in the skill sidecar file.",
+      "scriptsTitle": "Bundled Scripts",
+      "scriptsHint": "Only scripts under scripts/ can be run via skill_run.",
+      "noScripts": "No runnable scripts detected",
+      "scriptEnabled": "Enabled",
+      "scriptDescription": "Description Override",
+      "scriptDescriptionPlaceholder": "Optional description shown to the agent",
+      "runtime": {
+        "auto": "自動フォールバック",
+        "system": "システムランタイム",
+        "builtin": "内蔵ランタイム"
+      }
     },
     "empty": "スキルなし",
     "emptyHint": "「「スキル追加」ボタンをクリックして新しいスキルをインストール」",
@@ -1256,6 +1475,218 @@
       "syncing": "インポート中…",
       "title": "外部ツール"
     },
-    "title": "スキル管理"
+    "title": "スキル管理",
+    "card": {
+      "scripts": "{count} scripts",
+      "env": "{count} env",
+      "pythonShort": "Py",
+      "nodeShort": "Node"
+    }
+  },
+  "environments": {
+    "title": "環境",
+    "description": "セッションで使用したプロジェクトディレクトリを確認し、すばやく開いたり、新しいチャットのデフォルトとして設定できます。",
+    "default": {
+      "title": "デフォルトディレクトリ",
+      "description": "新しいチャットではこのディレクトリが事前選択されますが、手動選択が優先されます。",
+      "empty": "デフォルトディレクトリは設定されていません。"
+    },
+    "history": {
+      "title": "履歴",
+      "description": "ここには実際にセッションで使われたディレクトリだけが表示されます。"
+    },
+    "temp": {
+      "title": "Temp ディレクトリ",
+      "description": "システムの一時領域またはアプリ管理のワークスペース配下のディレクトリはここにまとめられ、既定では非表示です。"
+    },
+    "actions": {
+      "refresh": "更新",
+      "showMissing": "存在しないディレクトリを表示",
+      "open": "開く",
+      "setDefault": "デフォルトに設定",
+      "clearDefault": "デフォルトを解除",
+      "showTemp": "Temp を表示",
+      "hideTemp": "Temp を隠す"
+    },
+    "badges": {
+      "default": "デフォルト",
+      "temp": "Temp",
+      "missing": "見つかりません",
+      "notInHistory": "履歴外"
+    },
+    "meta": {
+      "sessions": "{count} 件のセッション",
+      "lastUsed": "最終使用: {value}",
+      "never": "未使用"
+    },
+    "empty": {
+      "regular": "表示できる環境はありません。",
+      "temp": "Temp 環境はまだありません。"
+    },
+    "errors": {
+      "openTitle": "ディレクトリを開けませんでした"
+    }
+  },
+  "remote": {
+    "title": "リモート",
+    "description": "Telegram と Feishu のリモート操作を 1 か所で設定します。",
+    "telegram": {
+      "title": "Telegram",
+      "description": "1 つの Telegram Bot でリモート操作と Hook 配信を管理します。",
+      "botToken": "Bot トークン",
+      "botTokenPlaceholder": "Telegram Bot トークン"
+    },
+    "remoteControl": {
+      "title": "リモート操作",
+      "description": "各リモートエンドポイントを 1 つの DeepChat セッションに結び付け、そのセッションをコマンド間で使い続けます。",
+      "streamMode": "ストリーミングモード",
+      "streamModeDraft": "下書きストリーミング",
+      "streamModeFinal": "最終結果のみ",
+      "allowedUserIds": "許可するユーザー ID",
+      "allowedUserIdsPlaceholder": "e.g. 123456789, 987654321",
+      "defaultAgent": "デフォルトの DeepChat Agent",
+      "defaultAgentPlaceholder": "Agent を選択",
+      "defaultWorkdir": "デフォルトディレクトリ",
+      "defaultWorkdirPlaceholder": "空欄の場合はグローバルのデフォルトディレクトリを使用",
+      "defaultWorkdirHelper": "デフォルトエージェントが ACP の場合に使用します。空欄の場合はグローバルのデフォルトディレクトリにフォールバックします。",
+      "openPairDialog": "ペアリング",
+      "manageBindings": "バインド管理",
+      "pairCode": "ペアリングコード",
+      "noPairCode": "有効なペアリングコードはありません",
+      "generatePairCode": "生成",
+      "clearPairCode": "クリア",
+      "pairCodeExpiresAt": "{time} に期限切れ",
+      "pairDialogTitle": "Telegram ペアリング",
+      "pairDialogDescription": "ペアリングコードを生成し、Telegram Bot とのチャットでペアリングを完了してください。",
+      "pairDialogInstruction": "対応する Bot にこのコマンドを送信してください:",
+      "bindingsDialogTitle": "紐付け済みセッション",
+      "bindingsDialogDescription": "Telegram のセッション紐付けを 1 件ずつ解除します。",
+      "bindingsEmpty": "Telegram の紐付けはまだありません。",
+      "pairingSuccessTitle": "ペアリング完了",
+      "pairingSuccessDescription": "許可されたユーザー ID の一覧を更新しました。",
+      "clearBindings": "バインドをクリア",
+      "clearBindingsResult": "{count} 件のバインドをクリアしました。",
+      "pairDialogInstructionTelegram": "このコマンドを Telegram Bot に送信してください:",
+      "pairDialogInstructionFeishu": "このコマンドを Feishu Bot のダイレクトメッセージに送信してください:"
+    },
+    "hooks": {
+      "title": "Telegram Hook 通知",
+      "description": "同じ Telegram Bot を Hook 通知にも再利用します。",
+      "chatId": "チャット ID",
+      "chatIdPlaceholder": "e.g. 123456789",
+      "threadId": "スレッド ID（任意）",
+      "threadIdPlaceholder": "任意のスレッド ID"
+    },
+    "status": {
+      "title": "ランタイム状態",
+      "botUser": "Bot ユーザー: {username} ({id})",
+      "bindings": "バインド数: {count}、poll オフセット: {pollOffset}",
+      "states": {
+        "disabled": "無効",
+        "stopped": "停止中",
+        "starting": "起動中",
+        "running": "実行中",
+        "backoff": "失敗後に再試行中",
+        "error": "エラー"
+      }
+    },
+    "feishu": {
+      "title": "Feishu",
+      "description": "Feishu Bot を接続して、ダイレクトメッセージ、グループチャット、トピックスレッドから操作できます。",
+      "appId": "アプリ ID",
+      "appIdPlaceholder": "Feishu アプリ ID",
+      "appSecret": "アプリシークレット",
+      "appSecretPlaceholder": "Feishu アプリシークレット",
+      "verificationToken": "検証トークン",
+      "verificationTokenPlaceholder": "Feishu 検証トークン",
+      "encryptKey": "暗号化キー（任意）",
+      "encryptKeyPlaceholder": "イベント暗号化を有効にしていない場合は空欄のままにします",
+      "botUser": "Bot ユーザー: {name} ({openId})",
+      "bindings": "バインド数: {count}、ペア済みユーザー: {pairedUserCount}",
+      "pairedUserOpenIds": "ペア済みユーザー Open ID",
+      "pairedUserOpenIdsPlaceholder": "例: ou_xxx, ou_yyy",
+      "accessRulesDescription": "まずダイレクトメッセージでペアリングしてください。グループでは、{'@'} で Bot をメンションしたペア済みユーザーだけがセッションを操作できます。",
+      "accessRule1": "ダイレクトメッセージで /pair [コード] を送ってペアリングします。",
+      "accessRule2": "グループとトピックでは、ペア済みユーザーが {'@'} で Bot をメンションしたときだけ反応します。"
+    },
+    "sections": {
+      "credentials": "認証情報",
+      "remoteControl": "リモート操作",
+      "notifications": "通知",
+      "accessRules": "アクセスルール"
+    },
+    "overview": {
+      "telegram": "{bindingCount} 件のバインド、{pairedCount} 人のペア済みユーザー、hooks {hooks}",
+      "feishu": "{bindingCount} 件のバインド、{pairedCount} 人のペア済みユーザー",
+      "hooksOn": "有効",
+      "hooksOff": "無効"
+    },
+    "bindingKinds": {
+      "dm": "DM",
+      "group": "グループ",
+      "topic": "トピック"
+    }
+  },
+  "deepchatAgents": {
+    "title": "DeepChatエージェント",
+    "description": "DeepChatエージェントと、新しいセッションに適用する既定値を管理します。",
+    "builtIn": "内蔵",
+    "editTitle": "DeepChatエージェントを編集",
+    "createTitle": "DeepChatエージェントを作成",
+    "unnamed": "名称未設定のエージェント",
+    "name": "名称",
+    "namePlaceholder": "例: 執筆 / 調査 / 翻訳",
+    "enabledLabel": "有効",
+    "descriptionLabel": "説明",
+    "descriptionPlaceholder": "このエージェントの用途を補足する任意のメモ",
+    "avatarTitle": "アバター",
+    "avatarDefault": "デフォルト",
+    "avatarDefaultDesc": "DeepChat は内蔵アイコンを使用し、他のエージェントは文字アバターを使用します。",
+    "avatarLucide": "Lucide アイコン",
+    "avatarLucideDesc": "Lucide アイコンを選び、ライト/ダーク用の色を設定します。",
+    "avatarMonogram": "文字アバター",
+    "avatarMonogramDesc": "英字2文字、または最初の CJK 文字を使用します。",
+    "lucideIcon": "Lucide アイコン名",
+    "lightColor": "ライト時の色",
+    "darkColor": "ダーク時の色",
+    "monogramText": "文字アバター",
+    "monogramPlaceholder": "例: WR / 研",
+    "backgroundColor": "背景色",
+    "modelsTitle": "モデルの既定値",
+    "chatModel": "既定の会話モデル",
+    "assistantModel": "アシスタントモデル",
+    "visionModel": "視覚モデル",
+    "temperature": "温度",
+    "contextLength": "コンテキスト長",
+    "maxTokens": "最大トークン数",
+    "thinkingBudget": "思考予算",
+    "reasoningEffort": "推論強度",
+    "verbosity": "詳細度",
+    "interleaved": "インターリーブ思考互換を強制",
+    "systemPrompt": "既定のシステムプロンプト",
+    "systemPromptPlaceholder": "空欄のシステムプロンプトにする場合は空のままにします",
+    "defaultProjectPath": "既定のディレクトリ（任意）",
+    "defaultProjectPathPlaceholder": "未設定の場合はグローバル既定ディレクトリを使用します",
+    "permissionMode": "既定の権限",
+    "permissionFullAccess": "フルアクセス",
+    "permissionDefault": "既定の権限",
+    "toolsTitle": "内蔵ツール",
+    "compactionTitle": "自動圧縮",
+    "compactionEnabled": "自動圧縮を有効にする",
+    "compactionDescription": "これらの既定値は、今後作成する DeepChat セッションにのみ適用されます。",
+    "compactionThreshold": "発動しきい値",
+    "compactionRetainPairs": "保持する直近ペア数",
+    "deleteConfirm": "エージェント「{name}」を削除しますか？ その履歴は内蔵 DeepChat エージェントに戻されます。",
+    "subagentsTitle": "サブエージェント",
+    "subagentsDescription": "`subagent_orchestrator` で使える再利用可能な子セッションスロットを設定します。",
+    "subagentsEnabled": "サブエージェントを有効にする",
+    "subagentTargetType": "対象タイプ",
+    "subagentTargetSelf": "このエージェント",
+    "subagentTargetAgent": "エージェント",
+    "subagentDisplayName": "表示名",
+    "subagentDescription": "スロットの説明",
+    "subagentTargetAgentLabel": "対象エージェント",
+    "subagentLimit": "{count}/{max} スロット",
+    "addSubagentSlot": "+ スロットを追加"
   }
 }

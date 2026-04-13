@@ -1,6 +1,6 @@
 <template>
-  <div class="flex h-full min-w-0 flex-1 overflow-hidden">
-    <aside class="flex h-full w-[224px] shrink-0 flex-col border-r bg-muted/20">
+  <div class="flex h-full min-h-0 min-w-0 flex-1 overflow-hidden">
+    <aside class="flex h-full min-h-0 w-[224px] shrink-0 flex-col border-r bg-muted/20">
       <div class="flex-1 overflow-auto py-2">
         <section>
           <button
@@ -123,25 +123,20 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, toRef, watch } from 'vue'
 import { Icon } from '@iconify/vue'
 import { useI18n } from 'vue-i18n'
 import { usePresenter } from '@/composables/usePresenter'
 import { extractArtifactsFromContent } from '@/composables/useArtifacts'
 import WorkspaceFileNode from '@/components/workspace/WorkspaceFileNode.vue'
 import WorkspaceViewer from './WorkspaceViewer.vue'
+import { useWorkspaceSync } from './composables/useWorkspaceSync'
 import { useArtifactStore } from '@/stores/artifact'
 import { useMessageStore } from '@/stores/ui/message'
 import { useSidepanelStore, type WorkspaceArtifactContext } from '@/stores/ui/sidepanel'
-import type {
-  WorkspaceFileNode as WorkspaceTreeNode,
-  WorkspaceFilePreview,
-  WorkspaceGitDiff,
-  WorkspaceGitFileChange,
-  WorkspaceGitState
-} from '@shared/presenter'
-import type { AssistantMessageBlock } from '@shared/chat'
+import type { WorkspaceGitFileChange } from '@shared/presenter'
 import type { ChatMessageRecord } from '@shared/types/agent-interface'
+import type { DisplayAssistantMessageBlock } from '@/components/chat/messageListItems'
 
 const props = defineProps<{
   sessionId: string
@@ -165,19 +160,30 @@ const messageStore = useMessageStore()
 const sidepanelStore = useSidepanelStore()
 const workspacePresenter = usePresenter('workspacePresenter')
 
-const fileTree = ref<WorkspaceTreeNode[]>([])
-const selectedFilePreview = ref<WorkspaceFilePreview | null>(null)
-const selectedGitDiff = ref<WorkspaceGitDiff | null>(null)
-const gitState = ref<WorkspaceGitState | null>(null)
-const loadingFiles = ref(false)
-const loadingFilePreview = ref(false)
-const loadingGitDiff = ref(false)
-
 const sessionState = computed(() => sidepanelStore.getSessionState(props.sessionId))
+const {
+  fileTree,
+  selectedFilePreview,
+  selectedGitDiff,
+  gitState,
+  loadingFiles,
+  loadingFilePreview,
+  loadingGitDiff,
+  toggleNode
+} = useWorkspaceSync({
+  sessionId: toRef(props, 'sessionId'),
+  workspacePath: toRef(props, 'workspacePath'),
+  active: computed(() => sidepanelStore.open),
+  sessionState,
+  workspacePresenter,
+  sidepanelStore
+})
 
 const parseAssistantBlocks = (record: ChatMessageRecord) => {
   try {
-    return JSON.parse(record.content) as Array<Pick<AssistantMessageBlock, 'content' | 'status'>>
+    return JSON.parse(record.content) as Array<
+      Pick<DisplayAssistantMessageBlock, 'content' | 'status'>
+    >
   } catch {
     return []
   }
@@ -249,70 +255,6 @@ const selectedArtifact = computed(() => {
   }
 })
 
-const loadWorkspace = async (workspacePath: string | null) => {
-  fileTree.value = []
-  gitState.value = null
-  selectedFilePreview.value = null
-  selectedGitDiff.value = null
-
-  if (!workspacePath) {
-    return
-  }
-
-  loadingFiles.value = true
-  try {
-    await workspacePresenter.registerWorkspace(workspacePath)
-    fileTree.value = (await workspacePresenter.readDirectory(workspacePath)) ?? []
-    gitState.value = await workspacePresenter.getGitStatus(workspacePath)
-  } finally {
-    loadingFiles.value = false
-  }
-}
-
-watch(
-  () => props.workspacePath,
-  (workspacePath) => {
-    void loadWorkspace(workspacePath)
-  },
-  { immediate: true }
-)
-
-watch(
-  () => sessionState.value.selectedFilePath,
-  async (filePath) => {
-    selectedFilePreview.value = null
-    if (!filePath) {
-      return
-    }
-
-    loadingFilePreview.value = true
-    try {
-      selectedFilePreview.value = await workspacePresenter.readFilePreview(filePath)
-    } finally {
-      loadingFilePreview.value = false
-    }
-  },
-  { immediate: true }
-)
-
-watch(
-  () => sessionState.value.selectedDiffPath,
-  async (filePath) => {
-    selectedGitDiff.value = null
-    if (!filePath || !props.workspacePath) {
-      return
-    }
-
-    loadingGitDiff.value = true
-    try {
-      selectedGitDiff.value = await workspacePresenter.getGitDiff(props.workspacePath, filePath)
-    } finally {
-      loadingGitDiff.value = false
-    }
-  },
-  { immediate: true }
-)
-
 watch(
   [artifactItems, () => sessionState.value.selectedArtifactContext] as const,
   ([items, context]) => {
@@ -320,52 +262,24 @@ watch(
       return
     }
 
-    const exists = items.some(
+    const existsInArtifactItems = items.some(
       (item) =>
         item.threadId === context.threadId &&
         item.messageId === context.messageId &&
         item.artifactId === context.artifactId
     )
 
-    if (!exists) {
+    const matchesCurrentArtifact =
+      artifactStore.currentArtifact?.id === context.artifactId &&
+      artifactStore.currentMessageId === context.messageId &&
+      artifactStore.currentThreadId === context.threadId
+
+    if (!existsInArtifactItems && !matchesCurrentArtifact) {
       sidepanelStore.clearArtifact(props.sessionId)
     }
   },
   { immediate: true }
 )
-
-watch(
-  [gitState, () => sessionState.value.selectedDiffPath] as const,
-  ([state, selectedDiffPath]) => {
-    if (!selectedDiffPath) {
-      return
-    }
-
-    const exists = Boolean(state?.changes.some((change) => change.path === selectedDiffPath))
-    if (!exists) {
-      sidepanelStore.clearDiff(props.sessionId)
-      selectedGitDiff.value = null
-    }
-  },
-  { immediate: true }
-)
-
-const toggleNode = async (node: WorkspaceTreeNode) => {
-  if (!node.isDirectory) {
-    return
-  }
-
-  if (node.expanded) {
-    node.expanded = false
-    return
-  }
-
-  if (!node.children) {
-    node.children = (await workspacePresenter.expandDirectory(node.path)) ?? []
-  }
-
-  node.expanded = true
-}
 
 const handleFileSelect = (filePath: string) => {
   sidepanelStore.selectFile(props.sessionId, filePath, {

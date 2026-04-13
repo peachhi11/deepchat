@@ -1,23 +1,10 @@
-import { type IPresenter } from '@shared/presenter'
+import { type IPresenter, type IRemoteControlPresenter } from '@shared/presenter'
 import { toRaw } from 'vue'
-
-// WebContentsId 缓存
-let cachedWebContentsId: number | null = null
+import { getRendererWindowContext } from '@/lib/windowContext'
 
 // 获取当前webContentsId
 export function getWebContentsId(): number | null {
-  if (cachedWebContentsId !== null) {
-    return cachedWebContentsId
-  }
-
-  try {
-    // 通过preload API获取webContentsId
-    cachedWebContentsId = window.api.getWebContentsId()
-    return cachedWebContentsId
-  } catch (error) {
-    console.warn('Failed to get webContentsId:', error)
-    return null
-  }
+  return getRendererWindowContext().webContentsId
 }
 // 安全的序列化函数，避免克隆不可序列化的对象
 function safeSerialize(obj: unknown): unknown {
@@ -38,12 +25,9 @@ function safeSerialize(obj: unknown): unknown {
   for (const key in obj) {
     if (Object.prototype.hasOwnProperty.call(obj, key)) {
       const value = (obj as Record<string, unknown>)[key]
-      // 跳过函数、Symbol和其他不可序列化的值
-      if (
-        typeof value !== 'function' &&
-        typeof value !== 'symbol' &&
-        typeof value !== 'undefined'
-      ) {
+      // Skip non-cloneable callable/symbol values, but preserve undefined so
+      // partial update payloads can explicitly clear fields across IPC.
+      if (typeof value !== 'function' && typeof value !== 'symbol') {
         serialized[key] = safeSerialize(value)
       }
     }
@@ -60,7 +44,7 @@ function tryToRow(payloads: unknown[]) {
   }
 }
 
-function createProxy(presenterName: string, safeCall: boolean) {
+function createProxy(channel: string, safeCall: boolean, presenterName?: string) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return new Proxy({} as any, {
     get(_, functionName) {
@@ -72,25 +56,27 @@ function createProxy(presenterName: string, safeCall: boolean) {
         const rawPayloads = tryToRow(payloads)
 
         // 在调用中记录 webContentsId
+        const callTarget = presenterName
+          ? `${presenterName}.${functionName as string}`
+          : `remoteControlPresenter.${functionName as string}`
+
         if (import.meta.env.VITE_LOG_IPC_CALL === '1') {
-          console.log(
-            `[Renderer IPC] WebContents:${webContentsId || 'unknown'} -> ${presenterName}.${functionName as string}`
-          )
+          console.log(`[Renderer IPC] WebContents:${webContentsId || 'unknown'} -> ${callTarget}`)
         }
 
-        const invokedPromise = window.electron.ipcRenderer.invoke(
-          'presenter:call',
-          presenterName,
-          functionName,
-          ...rawPayloads
-        )
+        const invokedPromise =
+          presenterName != null
+            ? window.electron.ipcRenderer.invoke(
+                channel,
+                presenterName,
+                functionName,
+                ...rawPayloads
+              )
+            : window.electron.ipcRenderer.invoke(channel, functionName, ...rawPayloads)
 
         if (safeCall) {
           return await invokedPromise.catch((e: Error) => {
-            console.warn(
-              `[Renderer IPC Error] WebContents:${webContentsId} ${presenterName}.${functionName as string}:`,
-              e
-            )
+            console.warn(`[Renderer IPC Error] WebContents:${webContentsId} ${callTarget}:`, e)
             return null
           })
         } else {
@@ -110,5 +96,10 @@ export function usePresenter<T extends keyof IPresenter>(
   options?: UsePresenterOptions
 ): IPresenter[T] {
   const safeCall = options?.safeCall ?? true
-  return createProxy(name, safeCall)
+  return createProxy('presenter:call', safeCall, name)
+}
+
+export function useRemoteControlPresenter(options?: UsePresenterOptions): IRemoteControlPresenter {
+  const safeCall = options?.safeCall ?? true
+  return createProxy('remoteControlPresenter:call', safeCall)
 }
